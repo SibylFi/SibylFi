@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Void scale */
+  --sf-void-000: #050208;
+  --sf-void-050: #0a0612;
+  --sf-void-100: #100a1c;
+  --sf-void-200: #1a0f2e;
+  --sf-void-300: #251940;
+  --sf-void-400: #322152;
+  --sf-void-500: #4a3370;
+
+  /* Gold scale */
+  --sf-gold-100: #fff4c2;
+  --sf-gold-300: #f0d875;
+  --sf-gold-500: #d4af37;
+  --sf-gold-700: #a8841f;
+
+  /* Violet scale */
+  --sf-violet-300: #c4a5ff;
+  --sf-violet-500: #9b6dff;
+  --sf-violet-600: #7c3aed;
+  --sf-violet-700: #5b21b6;
+
+  /* Signal semantics */
+  --sf-signal-win: #4ade80;
+  --sf-signal-loss: #f87171;
+  --sf-signal-pending: #fbbf24;
+
+  /* Surfaces */
+  --sf-bg: var(--sf-void-050);
+  --sf-bg-deep: var(--sf-void-000);
+  --sf-surface: rgba(26, 15, 46, 0.6);
+  --sf-border: rgba(212, 175, 55, 0.12);
+  --sf-border-strong: rgba(212, 175, 55, 0.35);
+  --sf-border-violet: rgba(155, 109, 255, 0.25);
+
+  /* Ink */
+  --sf-fg: #f5e9d0;
+  --sf-fg-dim: #b8a888;
+  --sf-fg-mute: #786a52;
+  --sf-fg-ghost: #4a4032;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--sf-bg-deep);
+  color: var(--sf-fg);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--sf-void-100); }
+::-webkit-scrollbar-thumb { background: var(--sf-void-400); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--sf-violet-700); }
