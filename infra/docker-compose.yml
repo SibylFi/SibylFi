@@ -1,0 +1,145 @@
+version: "3.9"
+
+x-base-python: &base-python
+  build:
+    context: ..
+    dockerfile: agents/shared/Dockerfile
+  env_file: [../.env]
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+    sidecar-0gstorage:
+      condition: service_started
+  networks: [sibylfi]
+
+services:
+  # ─────────────────────────────────────────────────────────────────
+  # Data plane
+  # ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sibylfi
+      POSTGRES_USER: sibylfi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sibylfi-dev-password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "sibylfi"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [sibylfi]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    networks: [sibylfi]
+    restart: unless-stopped
+
+  sidecar-0gstorage:
+    build: ../sidecar-0gstorage
+    env_file: [../.env]
+    environment:
+      MOCK_MODE: ${MOCK_MODE:-1}
+    networks: [sibylfi]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────
+  # Research Agents (3 personas)
+  # ─────────────────────────────────────────────────────────────────
+  research-meanrev:
+    <<: *base-python
+    command: ["uvicorn", "agents.research_meanrev.main:app", "--host", "0.0.0.0", "--port", "7101"]
+    expose: ["7101"]
+    ports: ["7101:7101"]
+    container_name: research-meanrev
+
+  research-momentum:
+    <<: *base-python
+    command: ["uvicorn", "agents.research_momentum.main:app", "--host", "0.0.0.0", "--port", "7102"]
+    expose: ["7102"]
+    ports: ["7102:7102"]
+    container_name: research-momentum
+
+  research-news:
+    <<: *base-python
+    command: ["uvicorn", "agents.research_news.main:app", "--host", "0.0.0.0", "--port", "7103"]
+    expose: ["7103"]
+    ports: ["7103:7103"]
+    container_name: research-news
+
+  # ─────────────────────────────────────────────────────────────────
+  # Trading + Risk + Validator
+  # ─────────────────────────────────────────────────────────────────
+  trading-agent:
+    <<: *base-python
+    command: ["uvicorn", "agents.trading.main:app", "--host", "0.0.0.0", "--port", "7104"]
+    expose: ["7104"]
+    ports: ["7104:7104"]
+    container_name: trading-agent
+
+  risk-agent:
+    <<: *base-python
+    command: ["uvicorn", "agents.risk.main:app", "--host", "0.0.0.0", "--port", "7105"]
+    expose: ["7105"]
+    ports: ["7105:7105"]
+    container_name: risk-agent
+
+  validator-agent:
+    <<: *base-python
+    command: ["uvicorn", "agents.validator.main:app", "--host", "0.0.0.0", "--port", "7106"]
+    expose: ["7106"]
+    ports: ["7106:7106"]
+    container_name: validator-agent
+
+  # ─────────────────────────────────────────────────────────────────
+  # Orchestrator (frontend BFF)
+  # ─────────────────────────────────────────────────────────────────
+  orchestrator:
+    <<: *base-python
+    command: ["uvicorn", "orchestrator.main:app", "--host", "0.0.0.0", "--port", "7100"]
+    expose: ["7100"]
+    ports: ["7100:7100"]
+    container_name: orchestrator
+
+  # ─────────────────────────────────────────────────────────────────
+  # Frontend
+  # ─────────────────────────────────────────────────────────────────
+  frontend:
+    build: ../frontend
+    env_file: [../.env]
+    environment:
+      NEXT_PUBLIC_ORCHESTRATOR_URL: http://orchestrator:7100
+    ports: ["3000:3000"]
+    depends_on: [orchestrator]
+    networks: [sibylfi]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────
+  # Reverse proxy
+  # ─────────────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddydata:/data
+      - caddyconfig:/config
+    networks: [sibylfi]
+    restart: unless-stopped
+    depends_on: [orchestrator, frontend]
+
+volumes:
+  pgdata: {}
+  caddydata: {}
+  caddyconfig: {}
+
+networks:
+  sibylfi: {}

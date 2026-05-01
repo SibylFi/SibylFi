@@ -1,0 +1,59 @@
+# SibylFi Caddy reverse proxy
+# Auto-TLS via Let's Encrypt for production hostnames; falls back to HTTP
+# for `localhost` in development.
+
+{
+    email ops@sibylfi.app
+    # Comment out the next line for prod (uses real Let's Encrypt CA)
+    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ─── Local development ───────────────────────────────────────────────
+:80 {
+    handle /api/* {
+        reverse_proxy orchestrator:7100
+    }
+    handle /demo/* {
+        reverse_proxy orchestrator:7100
+    }
+    handle /signal/meanrev/* {
+        reverse_proxy research-meanrev:7101
+    }
+    handle /signal/momentum/* {
+        reverse_proxy research-momentum:7102
+    }
+    handle /signal/news/* {
+        reverse_proxy research-news:7103
+    }
+    handle /verify/* {
+        reverse_proxy risk-agent:7105
+    }
+    handle {
+        reverse_proxy frontend:3000
+    }
+    encode gzip
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ─── Production hostnames ────────────────────────────────────────────
+# Uncomment and customize when deploying to a real domain.
+#
+# sibylfi.app {
+#     handle /api/*  { reverse_proxy orchestrator:7100 }
+#     handle /demo/* { reverse_proxy orchestrator:7100 }
+#     handle         { reverse_proxy frontend:3000 }
+#     encode gzip
+# }
+#
+# reversal.sibylfi.app {
+#     reverse_proxy research-meanrev:7101
+# }
+# wave.sibylfi.app {
+#     reverse_proxy research-momentum:7102
+# }
+# herald.sibylfi.app {
+#     reverse_proxy research-news:7103
+# }
