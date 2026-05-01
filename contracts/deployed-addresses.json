@@ -1,0 +1,25 @@
+{
+  "_note": "These addresses MUST be verified on the live block explorer before being trusted. The erc-8004-integration skill in .claude/skills/ enforces this.",
+  "_verifiedOn": "2026-04-29 (per skill — re-verify before mainnet)",
+  "sepolia": {
+    "chainId": 11155111,
+    "explorer": "https://sepolia.etherscan.io",
+    "ERC8004_IdentityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "ERC8004_ReputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+    "ENS_PublicResolver": "0x8FADE66B79cC9f707aB26799354482EB93a5B7dD"
+  },
+  "baseSepolia": {
+    "chainId": 84532,
+    "explorer": "https://sepolia.basescan.org",
+    "USDC": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "WETH": "0x4200000000000000000000000000000000000006",
+    "UniswapUniversalRouter_v2": "0x492E6456D9528771018DeB9E87ef7750EF184104",
+    "ValidatorSettle": "<<TO_BE_FILLED_AFTER_DEPLOY>>",
+    "DurinL2Registrar": "<<TO_BE_FILLED_AFTER_DEPLOY>>"
+  },
+  "ogGalileo": {
+    "chainId": 16601,
+    "explorer": "https://chainscan-galileo.0g.ai",
+    "_note": "0G Compute and 0G Storage are services, not contracts. Endpoints in .env."
+  }
+}

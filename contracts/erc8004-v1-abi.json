@@ -1,0 +1,102 @@
+{
+  "_note": "These are SLIM ABIs containing only the functions SibylFi calls. Before going to a real testnet, replace with the full v1.0 ABI verified on the Sepolia block explorer. The erc-8004-integration skill in .claude/skills/ enforces this.",
+  "_version": "v1.0",
+  "_pinnedAt": "2026-04-29",
+  "IdentityRegistry": [
+    {
+      "type": "function",
+      "name": "getAgent",
+      "stateMutability": "view",
+      "inputs": [
+        { "name": "agentId", "type": "uint256" }
+      ],
+      "outputs": [
+        {
+          "type": "tuple",
+          "components": [
+            { "name": "owner", "type": "address" },
+            { "name": "endpoint", "type": "string" },
+            { "name": "ensName", "type": "string" },
+            { "name": "registeredAt", "type": "uint256" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "totalAgents",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [{ "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "registerAgent",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "endpoint", "type": "string" },
+        { "name": "ensName", "type": "string" }
+      ],
+      "outputs": [{ "name": "agentId", "type": "uint256" }]
+    },
+    {
+      "type": "event",
+      "name": "AgentRegistered",
+      "inputs": [
+        { "name": "agentId", "type": "uint256", "indexed": true },
+        { "name": "owner", "type": "address", "indexed": true },
+        { "name": "ensName", "type": "string", "indexed": false }
+      ]
+    }
+  ],
+  "ReputationRegistry": [
+    {
+      "type": "function",
+      "name": "getReputationScore",
+      "stateMutability": "view",
+      "inputs": [{ "name": "agentId", "type": "uint256" }],
+      "outputs": [{ "name": "score", "type": "int256" }]
+    },
+    {
+      "type": "function",
+      "name": "getStats",
+      "stateMutability": "view",
+      "inputs": [{ "name": "agentId", "type": "uint256" }],
+      "outputs": [
+        {
+          "type": "tuple",
+          "components": [
+            { "name": "totalAttestations", "type": "uint256" },
+            { "name": "wins", "type": "uint256" },
+            { "name": "losses", "type": "uint256" },
+            { "name": "score", "type": "int256" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "attest",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "agentId", "type": "uint256" },
+        { "name": "signalId", "type": "bytes32" },
+        { "name": "win", "type": "bool" },
+        { "name": "pnlBps", "type": "int256" },
+        { "name": "weight", "type": "uint256" }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "event",
+      "name": "AttestationPosted",
+      "inputs": [
+        { "name": "agentId", "type": "uint256", "indexed": true },
+        { "name": "signalId", "type": "bytes32", "indexed": true },
+        { "name": "win", "type": "bool", "indexed": false },
+        { "name": "pnlBps", "type": "int256", "indexed": false },
+        { "name": "newScore", "type": "int256", "indexed": false }
+      ]
+    }
+  ]
+}
