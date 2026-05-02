@@ -1,0 +1,386 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  CARTAGENA ONCHAIN — SibylFi LONG ADAPTIVE v2
+//  "Jerga clara, blockchain espeso"
+//  
+//  · LONG-only · Captura subidas en bull/bear/range
+//  · Multi-setup: Spring (Wyckoff) + Pullback + Bounce + Breakout
+//  · Adaptive Learning: ajusta pesos según historial reciente
+//  · Frameworks: Wyckoff + Murphy + Elder + Douglas
+//  · Optimizado para 1M, 5M y 15M
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+strategy("CO SibylFi LONG Adaptive v2", overlay=true,
+     initial_capital=500,
+     default_qty_type=strategy.fixed,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// — Sizing
+grpSize     = "💵 Sizing"
+tradeSizeUSD = input.float(200.0, "Tamaño por trade (USD)", minval=10.0, maxval=100000.0, step=50.0, group=grpSize)
+useFixedSize = input.bool(true, "Usar tamaño fijo (vs % equity)", group=grpSize)
+
+// — Wyckoff (mantiene la base que dio 57%)
+grpW = "📊 Wyckoff Spring"
+useSpring    = input.bool(true,  "Activar Spring (rango)", group=grpW)
+srLookback   = input.int(50,  "Lookback S/R", minval=20, maxval=200, group=grpW)
+springWindow = input.int(3,   "Window Spring", minval=2, maxval=5, group=grpW)
+volQuiet     = input.float(0.80, "Volume threshold quiet", step=0.05, group=grpW)
+volSpike     = input.float(1.20, "Volume threshold spike", step=0.05, group=grpW)
+
+// — Setup 2: Pullback en tendencia alcista
+grpPB = "📈 Pullback Setup (tendencia alcista)"
+usePullback = input.bool(true, "Activar Pullback", group=grpPB)
+emaFast     = input.int(20,  "EMA Pullback", minval=5, group=grpPB)
+emaTrend    = input.int(50,  "EMA Tendencia", minval=20, group=grpPB)
+
+// — Setup 3: Rebote en RSI sobreventa (sirve en bajistas)
+grpBB = "🪂 Bounce Setup (rebote técnico)"
+useBounce  = input.bool(true, "Activar Bounce", group=grpBB)
+rsiLen     = input.int(14, "RSI Length", minval=2, group=grpBB)
+rsiOversold = input.int(30, "RSI Oversold", minval=10, maxval=40, group=grpBB)
+
+// — Setup 4: Breakout
+grpBO = "🚀 Breakout Setup"
+useBreakout = input.bool(true, "Activar Breakout", group=grpBO)
+breakoutLookback = input.int(20, "Breakout Lookback", minval=10, group=grpBO)
+
+// — Murphy
+grpM = "🎯 Murphy (filtros)"
+filterMode = input.string("Permitir todos los regímenes", "Régimen permitido",
+     options=["Solo en rango", "Solo en alcista", "Permitir todos los regímenes"], group=grpM)
+maxMaSeparation = input.float(0.03, "MA50/MA200 max separation", step=0.005, group=grpM)
+
+// — Elder
+grpE = "🛡️ Elder (riesgo)"
+riskPct      = input.float(1.0,  "Riesgo (% equity, si NO usa fijo)", minval=0.1, maxval=5.0, step=0.1, group=grpE)
+slPct        = input.float(0.5,  "SL fijo (% precio)", minval=0.1, maxval=5.0, step=0.05, group=grpE)
+rrRatio      = input.float(2.0,  "R:R ratio", minval=1.5, maxval=10.0, step=0.5, group=grpE)
+beTrigger    = input.float(1.5,  "BE Trigger (%)", minval=0.1, maxval=10.0, step=0.1, group=grpE)
+horizonBars  = input.int(48, "Horizon máx (bars)", minval=4, maxval=200, group=grpE)
+
+// — Douglas
+grpD = "🧘 Douglas (disciplina)"
+cooldownLoss = input.int(5, "Cooldown post-LOSS (bars)", minval=0, group=grpD)
+
+// — Adaptive Learning
+grpML = "🤖 Adaptive Learning"
+useML       = input.bool(true, "Activar Adaptive Weighting", group=grpML, tooltip="Ajusta los pesos de cada setup según su rendimiento reciente. Setups que ganan más, pesan más en el score.")
+mlMemory    = input.int(20, "Memoria de aprendizaje (trades)", minval=5, maxval=100, group=grpML, tooltip="Cuántos trades pasados considerar para aprender")
+mlMinScore  = input.float(0.55, "Score mínimo adaptativo", minval=0.3, maxval=1.0, step=0.05, group=grpML)
+showMLTable = input.bool(true, "Mostrar tabla ML", group=grpML)
+
+// — Modo de operación
+grpMode    = "🎮 Modo"
+modeChoice = input.string("Balanceado", "Modo", options=["Discovery", "Balanceado", "Conservador"], group=grpMode)
+
+// — Backtest range
+grpBT       = "📅 Rango Backtest"
+useBTRange  = input.bool(false, "Limitar rango", group=grpBT)
+btStart     = input.time(timestamp("2024-01-01 00:00"), "Desde", group=grpBT)
+btEnd       = input.time(timestamp("2026-12-31 23:59"), "Hasta", group=grpBT)
+inDateRange = not useBTRange or (time >= btStart and time <= btEnd)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INDICADORES BASE
+// ═══════════════════════════════════════════════════════════════════════════
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+volAvg = ta.sma(volume, 20)
+ema20  = ta.ema(close, emaFast)
+ema50  = ta.ema(close, emaTrend)
+rsi    = ta.rsi(close, rsiLen)
+atr14  = ta.atr(14)
+
+// Régimen de mercado
+maSeparation = math.abs(sma50 - sma200) / sma200
+isRanging    = maSeparation < maxMaSeparation
+isBullish    = sma50 > sma200 and close > sma200
+isBearish    = sma50 < sma200 and close < sma200
+
+regimeOK = filterMode == "Solo en rango" ? isRanging : filterMode == "Solo en alcista" ? isBullish : true
+
+// Soporte/Resistencia
+support    = ta.lowest(low,  srLookback)
+resistance = ta.highest(high, srLookback)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUP 1 — WYCKOFF SPRING (rango)
+// ═══════════════════════════════════════════════════════════════════════════
+penetratedDown       = ta.lowest(low, springWindow) < support[springWindow]
+volAtPenetrationDown = ta.lowest(volume, springWindow)
+recoveredUp          = close > support[springWindow] * 1.002
+springRaw = penetratedDown and recoveredUp and (volAtPenetrationDown < volAvg * volQuiet) and (volume > volAvg * volSpike)
+springSignal = useSpring and springRaw and isRanging
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUP 2 — PULLBACK A EMA (tendencia alcista)
+// ═══════════════════════════════════════════════════════════════════════════
+trendUp        = ema20 > ema50 and close > ema50
+pullbackTouch  = low <= ema20 * 1.005 and close > ema20
+pullbackBull   = close > open and close > (high + low) / 2
+pullbackSignal = usePullback and trendUp and pullbackTouch and pullbackBull
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUP 3 — BOUNCE TÉCNICO (sirve en bajistas)
+// ═══════════════════════════════════════════════════════════════════════════
+rsiCrossUp     = ta.crossover(rsi, rsiOversold)
+priceFromLow   = close > ta.lowest(low, 5) * 1.003
+bullEngulf     = close > open and close > high[1] and close > open[1]
+bounceSignal   = useBounce and rsiCrossUp and priceFromLow and bullEngulf
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUP 4 — BREAKOUT
+// ═══════════════════════════════════════════════════════════════════════════
+recentHigh = ta.highest(high[1], breakoutLookback)
+breakoutValid = close > recentHigh and volume > volAvg * 1.3 and close > open
+breakoutSignal = useBreakout and breakoutValid
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ADAPTIVE LEARNING — Pesos dinámicos por setup
+// ═══════════════════════════════════════════════════════════════════════════
+// Tracking del rendimiento de cada setup
+var int   springWins    = 0
+var int   springLosses  = 0
+var int   pullbackWins  = 0
+var int   pullbackLosses = 0
+var int   bounceWins    = 0
+var int   bounceLosses  = 0
+var int   breakoutWins  = 0
+var int   breakoutLosses = 0
+
+// Setup que disparó el último trade abierto
+var string activeSetup = ""
+
+// Cálculo de win rate por setup (con valor base 50% si hay pocos trades)
+springTotal   = springWins + springLosses
+pullbackTotal = pullbackWins + pullbackLosses
+bounceTotal   = bounceWins + bounceLosses
+breakoutTotal = breakoutWins + breakoutLosses
+
+springWR    = springTotal   >= 5 ? springWins   / springTotal   : 0.5
+pullbackWR  = pullbackTotal >= 5 ? pullbackWins / pullbackTotal : 0.5
+bounceWR    = bounceTotal   >= 5 ? bounceWins   / bounceTotal   : 0.5
+breakoutWR  = breakoutTotal >= 5 ? breakoutWins / breakoutTotal : 0.5
+
+// Pesos = win rate (clamp 0.2 a 1.0 para evitar pesos extremos)
+springWeight   = math.max(0.2, math.min(1.0, springWR))
+pullbackWeight = math.max(0.2, math.min(1.0, pullbackWR))
+bounceWeight   = math.max(0.2, math.min(1.0, bounceWR))
+breakoutWeight = math.max(0.2, math.min(1.0, breakoutWR))
+
+// Score adaptativo del momento actual
+adaptiveScore = 0.0
+chosenSetup = ""
+
+if springSignal
+    adaptiveScore := math.max(adaptiveScore, springWeight)
+    chosenSetup := "Spring"
+
+if pullbackSignal and pullbackWeight > adaptiveScore
+    adaptiveScore := pullbackWeight
+    chosenSetup := "Pullback"
+
+if bounceSignal and bounceWeight > adaptiveScore
+    adaptiveScore := bounceWeight
+    chosenSetup := "Bounce"
+
+if breakoutSignal and breakoutWeight > adaptiveScore
+    adaptiveScore := breakoutWeight
+    chosenSetup := "Breakout"
+
+// Modo override de score mínimo
+mlMinAdjusted = modeChoice == "Discovery" ? 0.40 : modeChoice == "Balanceado" ? 0.50 : mlMinScore
+
+passesML = not useML or adaptiveScore >= mlMinAdjusted
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COOLDOWN
+// ═══════════════════════════════════════════════════════════════════════════
+var int barsSinceLoss = 999
+if strategy.closedtrades > 0
+    lastTrade = strategy.closedtrades - 1
+    if strategy.closedtrades.profit(lastTrade) < 0 and strategy.closedtrades.exit_bar_index(lastTrade) == bar_index
+        barsSinceLoss := 0
+barsSinceLoss := barsSinceLoss + 1
+canTradeCooldown = barsSinceLoss >= cooldownLoss
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SEÑAL FINAL
+// ═══════════════════════════════════════════════════════════════════════════
+anySetupActive = springSignal or pullbackSignal or bounceSignal or breakoutSignal
+longSignal = anySetupActive and regimeOK and canTradeCooldown and passesML and inDateRange and chosenSetup != ""
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EJECUCIÓN
+// ═══════════════════════════════════════════════════════════════════════════
+var float entryPrice = na
+var float stopPrice  = na
+var float tpPrice    = na
+var bool  beMoved    = false
+
+if longSignal and strategy.position_size == 0
+    entryPrice := close
+    slDist     = close * (slPct / 100)
+    stopPrice  := close - slDist
+    tpPrice    := close + slDist * rrRatio
+    beMoved    := false
+    activeSetup := chosenSetup
+    
+    // Cálculo de cantidad
+    qty = 0.0
+    if useFixedSize
+        qty := tradeSizeUSD / close
+    else
+        riskUSD = strategy.equity * (riskPct / 100)
+        qty := riskUSD / slDist
+    
+    strategy.entry("LONG", strategy.long, qty=qty, comment=chosenSetup)
+
+if strategy.position_size > 0
+    // Breakeven
+    if not beMoved and high >= entryPrice * (1 + beTrigger / 100)
+        stopPrice := entryPrice
+        beMoved   := true
+    
+    strategy.exit("EXIT", from_entry="LONG", limit=tpPrice, stop=stopPrice, comment_profit="TP", comment_loss="SL")
+    
+    // Horizon cap
+    if (bar_index - strategy.opentrades.entry_bar_index(0)) > horizonBars
+        strategy.close_all(comment="Horizon")
+
+// Reset y aprendizaje al cerrar trade
+if strategy.position_size == 0
+    if not na(entryPrice) and strategy.closedtrades > 0
+        lastIdx = strategy.closedtrades - 1
+        if strategy.closedtrades.exit_bar_index(lastIdx) == bar_index
+            wasWin = strategy.closedtrades.profit(lastIdx) > 0
+            // Actualizar contadores según el setup activo
+            if activeSetup == "Spring"
+                if wasWin
+                    springWins := springWins + 1
+                else
+                    springLosses := springLosses + 1
+            else if activeSetup == "Pullback"
+                if wasWin
+                    pullbackWins := pullbackWins + 1
+                else
+                    pullbackLosses := pullbackLosses + 1
+            else if activeSetup == "Bounce"
+                if wasWin
+                    bounceWins := bounceWins + 1
+                else
+                    bounceLosses := bounceLosses + 1
+            else if activeSetup == "Breakout"
+                if wasWin
+                    breakoutWins := breakoutWins + 1
+                else
+                    breakoutLosses := breakoutLosses + 1
+    
+    entryPrice := na
+    stopPrice  := na
+    tpPrice    := na
+    activeSetup := ""
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLOTS
+// ═══════════════════════════════════════════════════════════════════════════
+plot(support,    color=color.new(color.green, 50), linewidth=1, title="Soporte")
+plot(resistance, color=color.new(color.red,   50), linewidth=1, title="Resistencia")
+plot(sma50,      color=color.new(color.blue,  60), title="SMA50")
+plot(sma200,     color=color.new(color.purple,60), title="SMA200")
+plot(ema20,      color=color.new(color.orange, 50), title="EMA20")
+
+bgcolor(isRanging ? color.new(color.gray, 92) : isBullish ? color.new(color.green, 95) : isBearish ? color.new(color.red, 95) : na)
+
+plotshape(springSignal,   title="Spring",   style=shape.triangleup, location=location.belowbar, color=color.green,  size=size.small, text="SP")
+plotshape(pullbackSignal, title="Pullback", style=shape.triangleup, location=location.belowbar, color=color.aqua,   size=size.tiny,  text="PB")
+plotshape(bounceSignal,   title="Bounce",   style=shape.triangleup, location=location.belowbar, color=color.yellow, size=size.tiny,  text="BC")
+plotshape(breakoutSignal, title="Breakout", style=shape.triangleup, location=location.belowbar, color=color.fuchsia,size=size.tiny,  text="BO")
+
+plot(strategy.position_size > 0 ? entryPrice : na, "Entry", color=color.new(color.white, 0), style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size > 0 ? stopPrice  : na, "Stop",  color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size > 0 ? tpPrice    : na, "TP",    color=color.new(color.lime, 0),  style=plot.style_linebr, linewidth=2)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABLA DE STATS GENERAL
+// ═══════════════════════════════════════════════════════════════════════════
+var table statsBox = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    wins   = strategy.wintrades
+    losses = strategy.losstrades
+    total  = wins + losses
+    wr     = total > 0 ? wins / total * 100 : 0.0
+    avgPnl = total > 0 ? strategy.netprofit / total : 0.0
+    pf     = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+    
+    table.cell(statsBox, 0, 0, "CO LONG Adaptive v2", text_color=color.white, bgcolor=color.new(color.blue, 50))
+    table.cell(statsBox, 1, 0, modeChoice, text_color=color.aqua, bgcolor=color.new(color.blue, 50))
+    
+    table.cell(statsBox, 0, 1, "💵 Trade Size", text_color=color.white)
+    table.cell(statsBox, 1, 1, "$" + str.tostring(tradeSizeUSD, "#"), text_color=color.aqua)
+    
+    table.cell(statsBox, 0, 2, "Trades", text_color=color.white)
+    table.cell(statsBox, 1, 2, str.tostring(total), text_color=color.white)
+    
+    table.cell(statsBox, 0, 3, "Win Rate", text_color=color.white)
+    table.cell(statsBox, 1, 3, str.tostring(wr, "#.0") + "%", text_color=wr >= 50 ? color.green : color.red)
+    
+    table.cell(statsBox, 0, 4, "Avg PnL", text_color=color.white)
+    table.cell(statsBox, 1, 4, "$" + str.tostring(avgPnl, "#.##"), text_color=avgPnl >= 0 ? color.green : color.red)
+    
+    table.cell(statsBox, 0, 5, "Profit Factor", text_color=color.white)
+    table.cell(statsBox, 1, 5, str.tostring(pf, "#.##"), text_color=pf >= 1.5 ? color.green : pf >= 1.0 ? color.orange : color.red)
+    
+    table.cell(statsBox, 0, 6, "Net Profit", text_color=color.white)
+    table.cell(statsBox, 1, 6, "$" + str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.green : color.red)
+    
+    table.cell(statsBox, 0, 7, "Setup activo", text_color=color.white)
+    table.cell(statsBox, 1, 7, chosenSetup != "" ? chosenSetup : "—", text_color=color.yellow)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABLA ML — Pesos adaptativos por setup
+// ═══════════════════════════════════════════════════════════════════════════
+var table mlBox = table.new(position.bottom_right, 4, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast and showMLTable
+    table.cell(mlBox, 0, 0, "🤖 Adaptive Learning", text_color=color.yellow, bgcolor=color.new(color.purple, 50))
+    table.cell(mlBox, 1, 0, "W", text_color=color.yellow, bgcolor=color.new(color.purple, 50))
+    table.cell(mlBox, 2, 0, "L", text_color=color.yellow, bgcolor=color.new(color.purple, 50))
+    table.cell(mlBox, 3, 0, "Peso", text_color=color.yellow, bgcolor=color.new(color.purple, 50))
+    
+    table.cell(mlBox, 0, 1, "Spring",   text_color=color.white)
+    table.cell(mlBox, 1, 1, str.tostring(springWins),   text_color=color.lime)
+    table.cell(mlBox, 2, 1, str.tostring(springLosses), text_color=color.red)
+    table.cell(mlBox, 3, 1, str.tostring(springWeight, "#.00"), text_color=springWeight > 0.55 ? color.lime : springWeight < 0.45 ? color.red : color.white)
+    
+    table.cell(mlBox, 0, 2, "Pullback", text_color=color.white)
+    table.cell(mlBox, 1, 2, str.tostring(pullbackWins),   text_color=color.lime)
+    table.cell(mlBox, 2, 2, str.tostring(pullbackLosses), text_color=color.red)
+    table.cell(mlBox, 3, 2, str.tostring(pullbackWeight, "#.00"), text_color=pullbackWeight > 0.55 ? color.lime : pullbackWeight < 0.45 ? color.red : color.white)
+    
+    table.cell(mlBox, 0, 3, "Bounce",   text_color=color.white)
+    table.cell(mlBox, 1, 3, str.tostring(bounceWins),   text_color=color.lime)
+    table.cell(mlBox, 2, 3, str.tostring(bounceLosses), text_color=color.red)
+    table.cell(mlBox, 3, 3, str.tostring(bounceWeight, "#.00"), text_color=bounceWeight > 0.55 ? color.lime : bounceWeight < 0.45 ? color.red : color.white)
+    
+    table.cell(mlBox, 0, 4, "Breakout", text_color=color.white)
+    table.cell(mlBox, 1, 4, str.tostring(breakoutWins),   text_color=color.lime)
+    table.cell(mlBox, 2, 4, str.tostring(breakoutLosses), text_color=color.red)
+    table.cell(mlBox, 3, 4, str.tostring(breakoutWeight, "#.00"), text_color=breakoutWeight > 0.55 ? color.lime : breakoutWeight < 0.45 ? color.red : color.white)
+    
+    table.cell(mlBox, 0, 5, "Score actual", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(mlBox, 1, 5, str.tostring(adaptiveScore, "#.00"), text_color=color.aqua, bgcolor=color.new(color.gray, 50))
+    table.cell(mlBox, 2, 5, "min:", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(mlBox, 3, 5, str.tostring(mlMinAdjusted, "#.00"), text_color=color.aqua, bgcolor=color.new(color.gray, 50))
+
+alertcondition(longSignal, title="🚀 Señal LONG", message="CO Adaptive v2: {{ticker}} @ {{close}}")
