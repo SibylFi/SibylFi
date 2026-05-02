@@ -1,0 +1,38 @@
+{
+  "_note": "Synthetic 5-minute TWAP fixtures keyed by token. Validator reads these in MOCK_MODE.",
+  "WETH/USDC": {
+    "ref_price": 3450.21,
+    "twap_5min_at_publication": 3450.50,
+    "horizons": {
+      "3600":  { "twap": 3481.40, "outcome_hint": "win"  },
+      "7200":  { "twap": 3464.20, "outcome_hint": "win"  },
+      "14400": { "twap": 3445.80, "outcome_hint": "loss" }
+    }
+  },
+  "WBTC/USDC": {
+    "ref_price": 67234.50,
+    "twap_5min_at_publication": 67280.00,
+    "horizons": {
+      "3600":  { "twap": 67450.00, "outcome_hint": "win"  },
+      "7200":  { "twap": 67380.00, "outcome_hint": "win"  },
+      "14400": { "twap": 67120.00, "outcome_hint": "loss" }
+    }
+  },
+  "ARB/USDC": {
+    "ref_price": 0.842,
+    "twap_5min_at_publication": 0.844,
+    "horizons": {
+      "3600":  { "twap": 0.851, "outcome_hint": "win"  },
+      "7200":  { "twap": 0.836, "outcome_hint": "loss" },
+      "14400": { "twap": 0.829, "outcome_hint": "loss" }
+    }
+  },
+  "OP/USDC": {
+    "ref_price": 1.842,
+    "twap_5min_at_publication": 1.843,
+    "horizons": {
+      "3600":  { "twap": 1.812, "outcome_hint": "win" },
+      "7200":  { "twap": 1.860, "outcome_hint": "loss" }
+    }
+  }
+}
