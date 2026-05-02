@@ -1,0 +1,525 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  CARTAGENA ONCHAIN — SibylFi LONG ADAPTIVE v4 (MULTI-ASSET)
+//  "Jerga clara, blockchain espeso"
+//  
+//  v4 mejoras sobre v3 (que dio 50.9% WR, DD 5.67%, PF 1.28):
+//  · Tabla ML arreglada (posición bottom_left, datos legibles)
+//  · Monitor multi-asset: lee BTC/ETH/SOL en paralelo
+//  · Filtro de fuerza relativa: opera solo si el activo lidera
+//  · Filtro de correlación: si BTC cae fuerte, pausa LONGs
+//  · Dashboard con tendencia comparativa de los 3 activos
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+strategy("CO SibylFi LONG Adaptive v4", overlay=true,
+     initial_capital=500,
+     default_qty_type=strategy.fixed,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// — Sizing
+grpSize     = "💵 Sizing"
+tradeSizeUSD = input.float(200.0, "Tamaño base (USD)", minval=10.0, maxval=100000.0, step=50.0, group=grpSize)
+useFixedSize = input.bool(true, "Usar tamaño fijo", group=grpSize)
+useConfluence = input.bool(true, "Bonus 1.5× por confluencia", group=grpSize)
+
+// — Multi-Asset (NUEVO v4)
+grpMA = "🌐 Multi-Asset Monitor (NUEVO v4)"
+useMultiAsset = input.bool(true, "Activar monitor multi-asset", group=grpMA, tooltip="Lee BTC/ETH/SOL para tomar decisiones más informadas")
+asset1 = input.symbol("BINANCE:BTCUSDT", "Asset 1 (anchor)", group=grpMA)
+asset2 = input.symbol("BINANCE:ETHUSDT", "Asset 2", group=grpMA)
+asset3 = input.symbol("BINANCE:SOLUSDT", "Asset 3", group=grpMA)
+useCorrFilter = input.bool(true, "Filtrar si BTC cae fuerte", group=grpMA, tooltip="Si BTC cae más de X% en últimas N barras, pausa LONGs")
+btcDropPct = input.float(2.0, "Caída BTC umbral (%)", minval=0.5, maxval=10.0, step=0.5, group=grpMA)
+btcDropBars = input.int(20, "Barras para medir caída BTC", minval=5, maxval=100, group=grpMA)
+useRelStrength = input.bool(false, "Solo operar si activo > BTC en RS", group=grpMA, tooltip="Operar solo si el activo actual supera a BTC en fuerza relativa")
+rsLookback = input.int(50, "RS lookback", minval=10, group=grpMA)
+
+// — Wyckoff
+grpW = "📊 Wyckoff Spring"
+useSpring    = input.bool(true,  "Activar Spring", group=grpW)
+srLookback   = input.int(50, "Lookback S/R", minval=20, maxval=200, group=grpW)
+springWindow = input.int(3,  "Window Spring", minval=2, maxval=5, group=grpW)
+volQuiet     = input.float(0.80, "Vol quiet", step=0.05, group=grpW)
+volSpike     = input.float(1.20, "Vol spike", step=0.05, group=grpW)
+
+// — Pullback
+grpPB = "📈 Pullback"
+usePullback = input.bool(true, "Activar Pullback", group=grpPB)
+emaFast     = input.int(20, "EMA Pullback", minval=5, group=grpPB)
+emaTrend    = input.int(50, "EMA Tendencia", minval=20, group=grpPB)
+emaMacro    = input.int(200, "EMA Macro", minval=50, group=grpPB)
+
+// — Bounce
+grpBB = "🪂 Bounce"
+useBounce  = input.bool(true, "Activar Bounce", group=grpBB)
+rsiLen     = input.int(14, "RSI", minval=2, group=grpBB)
+rsiOversold = input.int(30, "Oversold", minval=10, maxval=40, group=grpBB)
+bounceMinATR = input.float(0.3, "ATR mín bounce (%)", minval=0.1, group=grpBB)
+
+// — Breakout
+grpBO = "🚀 Breakout"
+useBreakout = input.bool(true, "Activar Breakout", group=grpBO)
+breakoutLookback = input.int(20, "Lookback", minval=10, group=grpBO)
+breakoutVolMult = input.float(1.5, "Vol mult", step=0.1, group=grpBO)
+
+// — Murphy
+grpM = "🎯 Murphy"
+filterMode = input.string("Permitir todos los regímenes", "Régimen", options=["Solo en rango", "Solo en alcista", "Permitir todos los regímenes"], group=grpM)
+maxMaSeparation = input.float(0.03, "MA sep max", step=0.005, group=grpM)
+
+// — Elder
+grpE = "🛡️ Elder"
+riskPct      = input.float(1.0, "Riesgo %", minval=0.1, maxval=5.0, step=0.1, group=grpE)
+slPct        = input.float(0.5, "SL fijo (%)", minval=0.1, maxval=5.0, step=0.05, group=grpE)
+rrRatio      = input.float(2.0, "R:R", minval=1.5, maxval=10.0, step=0.5, group=grpE)
+beTrigger    = input.float(1.0, "BE Trigger (%)", minval=0.1, maxval=10.0, step=0.1, group=grpE)
+useTrailing  = input.bool(true, "Trailing tras BE", group=grpE)
+trailATR     = input.float(2.0, "Trailing ATR", minval=0.5, step=0.5, group=grpE)
+horizonBars  = input.int(48, "Horizon (bars)", minval=4, maxval=200, group=grpE)
+
+// — Anti-Drawdown
+grpDD = "🚨 Anti-Drawdown"
+useDDProtection = input.bool(true, "Activar protección DD", group=grpDD)
+maxConsecLosses = input.int(3, "Pérdidas consecutivas max", minval=2, maxval=10, group=grpDD)
+ddPauseBars     = input.int(20, "Pausa (bars)", minval=5, maxval=200, group=grpDD)
+useDailyLossLimit = input.bool(true, "Stop diario", group=grpDD)
+dailyLossLimit  = input.float(3.0, "Pérdida diaria max (%)", minval=0.5, maxval=20.0, step=0.5, group=grpDD)
+
+// — Douglas
+grpD = "🧘 Douglas"
+cooldownLoss = input.int(5, "Cooldown post-LOSS", minval=0, group=grpD)
+useAdaptiveCooldown = input.bool(true, "Cooldown adaptativo", group=grpD)
+
+// — Adaptive Learning
+grpML = "🤖 Adaptive Learning"
+useML       = input.bool(true, "Activar Adaptive Weighting", group=grpML)
+showMLTable = input.bool(true, "Mostrar tabla ML", group=grpML)
+
+// — Modo
+grpMode    = "🎮 Modo"
+modeChoice = input.string("Balanceado", "Modo", options=["Discovery", "Balanceado", "Conservador"], group=grpMode)
+
+// — Backtest
+grpBT       = "📅 Rango"
+useBTRange  = input.bool(false, "Limitar rango", group=grpBT)
+btStart     = input.time(timestamp("2024-01-01 00:00"), "Desde", group=grpBT)
+btEnd       = input.time(timestamp("2026-12-31 23:59"), "Hasta", group=grpBT)
+inDateRange = not useBTRange or (time >= btStart and time <= btEnd)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MULTI-ASSET DATA (NUEVO v4)
+// ═══════════════════════════════════════════════════════════════════════════
+btcClose = request.security(asset1, timeframe.period, close, lookahead=barmerge.lookahead_off)
+ethClose = request.security(asset2, timeframe.period, close, lookahead=barmerge.lookahead_off)
+solClose = request.security(asset3, timeframe.period, close, lookahead=barmerge.lookahead_off)
+
+// Performance reciente (% change en btcDropBars)
+btcChange = useMultiAsset ? ((btcClose - btcClose[btcDropBars]) / btcClose[btcDropBars]) * 100 : 0
+ethChange = useMultiAsset ? ((ethClose - ethClose[btcDropBars]) / ethClose[btcDropBars]) * 100 : 0
+solChange = useMultiAsset ? ((solClose - solClose[btcDropBars]) / solClose[btcDropBars]) * 100 : 0
+
+// Filtro de caída de BTC
+btcCrashPause = useMultiAsset and useCorrFilter and btcChange < -btcDropPct
+
+// Tendencia de cada asset (close vs EMA50 propia)
+btcEma50 = request.security(asset1, timeframe.period, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+ethEma50 = request.security(asset2, timeframe.period, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+solEma50 = request.security(asset3, timeframe.period, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+
+btcBull = btcClose > btcEma50
+ethBull = ethClose > ethEma50
+solBull = solClose > solEma50
+
+bullishConsensus = (btcBull ? 1 : 0) + (ethBull ? 1 : 0) + (solBull ? 1 : 0)
+
+// Fuerza relativa (este activo vs BTC en lookback)
+currChange = ((close - close[rsLookback]) / close[rsLookback]) * 100
+btcChangeRS = useMultiAsset ? ((btcClose - btcClose[rsLookback]) / btcClose[rsLookback]) * 100 : 0
+relativeStrength = useMultiAsset ? currChange - btcChangeRS : 0
+rsFilterPass = not useRelStrength or relativeStrength > 0
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INDICADORES BASE
+// ═══════════════════════════════════════════════════════════════════════════
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+volAvg = ta.sma(volume, 20)
+ema20  = ta.ema(close, emaFast)
+ema50  = ta.ema(close, emaTrend)
+ema200 = ta.ema(close, emaMacro)
+rsi    = ta.rsi(close, rsiLen)
+atr14  = ta.atr(14)
+atrPct = (atr14 / close) * 100
+
+maSeparation = math.abs(sma50 - sma200) / sma200
+isRanging    = maSeparation < maxMaSeparation
+isBullish    = sma50 > sma200 and close > sma200
+isBearish    = sma50 < sma200 and close < sma200
+
+regimeOK = filterMode == "Solo en rango" ? isRanging : filterMode == "Solo en alcista" ? isBullish : true
+
+support    = ta.lowest(low,  srLookback)
+resistance = ta.highest(high, srLookback)
+
+priceRange20 = ta.highest(high, 20) - ta.lowest(low, 20)
+avgRange20   = ta.atr(20) * 20
+hasStructure = priceRange20 > avgRange20 * 0.5
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUPS
+// ═══════════════════════════════════════════════════════════════════════════
+penetratedDown       = ta.lowest(low, springWindow) < support[springWindow]
+volAtPenetrationDown = ta.lowest(volume, springWindow)
+recoveredUp          = close > support[springWindow] * 1.002
+strongClose          = close > (high + low) / 2
+springRaw = penetratedDown and recoveredUp and strongClose and (volAtPenetrationDown < volAvg * volQuiet) and (volume > volAvg * volSpike)
+springSignal = useSpring and springRaw and isRanging
+
+trendUp        = ema20 > ema50 and close > ema50 and close > ema200
+pullbackTouch  = low <= ema20 * 1.005 and close > ema20
+pullbackBull   = close > open and close > (high + low) / 2
+pullbackSignal = usePullback and trendUp and pullbackTouch and pullbackBull
+
+rsiCrossUp     = ta.crossover(rsi, rsiOversold)
+priceFromLow   = close > ta.lowest(low, 5) * 1.003
+bullEngulf     = close > open and close > high[1] and close > open[1]
+bounceVolatilityOK = atrPct >= bounceMinATR
+bounceSignal   = useBounce and rsiCrossUp and priceFromLow and bullEngulf and bounceVolatilityOK
+
+recentHigh = ta.highest(high[1], breakoutLookback)
+breakoutValid = close > recentHigh and volume > volAvg * breakoutVolMult and close > open and strongClose
+breakoutSignal = useBreakout and breakoutValid
+
+activeCount = (springSignal ? 1 : 0) + (pullbackSignal ? 1 : 0) + (bounceSignal ? 1 : 0) + (breakoutSignal ? 1 : 0)
+hasConfluence = activeCount >= 2
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ADAPTIVE LEARNING
+// ═══════════════════════════════════════════════════════════════════════════
+var int   springWins    = 0
+var int   springLosses  = 0
+var int   pullbackWins  = 0
+var int   pullbackLosses = 0
+var int   bounceWins    = 0
+var int   bounceLosses  = 0
+var int   breakoutWins  = 0
+var int   breakoutLosses = 0
+
+var string activeSetup = ""
+
+springTotal   = springWins + springLosses
+pullbackTotal = pullbackWins + pullbackLosses
+bounceTotal   = bounceWins + bounceLosses
+breakoutTotal = breakoutWins + breakoutLosses
+
+springWR    = springTotal   >= 5 ? springWins   / springTotal   : 0.5
+pullbackWR  = pullbackTotal >= 5 ? pullbackWins / pullbackTotal : 0.5
+bounceWR    = bounceTotal   >= 5 ? bounceWins   / bounceTotal   : 0.5
+breakoutWR  = breakoutTotal >= 5 ? breakoutWins / breakoutTotal : 0.5
+
+springWeight   = math.max(0.2, math.min(1.0, springWR))
+pullbackWeight = math.max(0.2, math.min(1.0, pullbackWR))
+bounceWeight   = math.max(0.2, math.min(1.0, bounceWR))
+breakoutWeight = math.max(0.2, math.min(1.0, breakoutWR))
+
+adaptiveScore = 0.0
+chosenSetup = ""
+
+if springSignal
+    adaptiveScore := math.max(adaptiveScore, springWeight)
+    chosenSetup := "Spring"
+
+if pullbackSignal and pullbackWeight > adaptiveScore
+    adaptiveScore := pullbackWeight
+    chosenSetup := "Pullback"
+
+if bounceSignal and bounceWeight > adaptiveScore
+    adaptiveScore := bounceWeight
+    chosenSetup := "Bounce"
+
+if breakoutSignal and breakoutWeight > adaptiveScore
+    adaptiveScore := breakoutWeight
+    chosenSetup := "Breakout"
+
+mlMinAdjusted = modeChoice == "Discovery" ? 0.40 : modeChoice == "Balanceado" ? 0.50 : 0.60
+passesML = not useML or adaptiveScore >= mlMinAdjusted
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ANTI-DRAWDOWN
+// ═══════════════════════════════════════════════════════════════════════════
+var int consecLosses = 0
+var int barsSincePauseStart = 9999
+var float dailyStartEquity = na
+var int currentDay = na
+
+todayDay = dayofmonth + month * 100
+if currentDay != todayDay
+    currentDay := todayDay
+    dailyStartEquity := strategy.equity
+
+dailyPnLPct = na(dailyStartEquity) ? 0.0 : ((strategy.equity - dailyStartEquity) / dailyStartEquity) * 100
+dailyLossExceeded = useDailyLossLimit and dailyPnLPct < -dailyLossLimit
+
+if strategy.closedtrades > 0
+    lastTrade = strategy.closedtrades - 1
+    if strategy.closedtrades.exit_bar_index(lastTrade) == bar_index
+        if strategy.closedtrades.profit(lastTrade) < 0
+            consecLosses := consecLosses + 1
+        else
+            consecLosses := 0
+
+ddPauseActive = useDDProtection and consecLosses >= maxConsecLosses
+if ddPauseActive
+    if barsSincePauseStart >= ddPauseBars
+        consecLosses := 0
+        barsSincePauseStart := 0
+    else
+        barsSincePauseStart := barsSincePauseStart + 1
+else
+    barsSincePauseStart := barsSincePauseStart + 1
+
+ddProtectionPass = not ddPauseActive
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COOLDOWN
+// ═══════════════════════════════════════════════════════════════════════════
+var int barsSinceLoss = 999
+if strategy.closedtrades > 0
+    lastTrade2 = strategy.closedtrades - 1
+    if strategy.closedtrades.profit(lastTrade2) < 0 and strategy.closedtrades.exit_bar_index(lastTrade2) == bar_index
+        barsSinceLoss := 0
+barsSinceLoss := barsSinceLoss + 1
+
+adaptiveCooldown = useAdaptiveCooldown ? cooldownLoss * (1 + consecLosses) : cooldownLoss
+canTradeCooldown = barsSinceLoss >= adaptiveCooldown
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SEÑAL FINAL — ahora con filtros multi-asset
+// ═══════════════════════════════════════════════════════════════════════════
+anySetupActive = springSignal or pullbackSignal or bounceSignal or breakoutSignal
+
+multiAssetPass = not btcCrashPause and rsFilterPass
+
+longSignal = anySetupActive and regimeOK and canTradeCooldown and passesML and ddProtectionPass and not dailyLossExceeded and hasStructure and multiAssetPass and inDateRange and chosenSetup != ""
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EJECUCIÓN
+// ═══════════════════════════════════════════════════════════════════════════
+var float entryPrice = na
+var float stopPrice  = na
+var float tpPrice    = na
+var bool  beMoved    = false
+var float highSinceEntry = na
+
+if longSignal and strategy.position_size == 0
+    entryPrice := close
+    slDist     = close * (slPct / 100)
+    stopPrice  := close - slDist
+    tpPrice    := close + slDist * rrRatio
+    beMoved    := false
+    highSinceEntry := close
+    activeSetup := chosenSetup
+    
+    sizeMultiplier = (useConfluence and hasConfluence) ? 1.5 : 1.0
+    qty = 0.0
+    if useFixedSize
+        qty := (tradeSizeUSD * sizeMultiplier) / close
+    else
+        riskUSD = strategy.equity * (riskPct / 100)
+        qty := riskUSD / slDist
+    
+    strategy.entry("LONG", strategy.long, qty=qty, comment=chosenSetup + (hasConfluence ? "+CF" : ""))
+
+if strategy.position_size > 0
+    if high > highSinceEntry
+        highSinceEntry := high
+    
+    if not beMoved and high >= entryPrice * (1 + beTrigger / 100)
+        stopPrice := entryPrice
+        beMoved   := true
+    
+    if useTrailing and beMoved
+        trailDist = atr14 * trailATR
+        newTrail = highSinceEntry - trailDist
+        if newTrail > stopPrice
+            stopPrice := newTrail
+    
+    strategy.exit("EXIT", from_entry="LONG", limit=tpPrice, stop=stopPrice, comment_profit="TP", comment_loss="SL")
+    
+    if (bar_index - strategy.opentrades.entry_bar_index(0)) > horizonBars
+        strategy.close_all(comment="Horizon")
+
+if strategy.position_size == 0
+    if not na(entryPrice) and strategy.closedtrades > 0
+        lastIdx = strategy.closedtrades - 1
+        if strategy.closedtrades.exit_bar_index(lastIdx) == bar_index
+            wasWin = strategy.closedtrades.profit(lastIdx) > 0
+            if activeSetup == "Spring"
+                if wasWin
+                    springWins := springWins + 1
+                else
+                    springLosses := springLosses + 1
+            else if activeSetup == "Pullback"
+                if wasWin
+                    pullbackWins := pullbackWins + 1
+                else
+                    pullbackLosses := pullbackLosses + 1
+            else if activeSetup == "Bounce"
+                if wasWin
+                    bounceWins := bounceWins + 1
+                else
+                    bounceLosses := bounceLosses + 1
+            else if activeSetup == "Breakout"
+                if wasWin
+                    breakoutWins := breakoutWins + 1
+                else
+                    breakoutLosses := breakoutLosses + 1
+    
+    entryPrice := na
+    stopPrice  := na
+    tpPrice    := na
+    highSinceEntry := na
+    activeSetup := ""
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLOTS
+// ═══════════════════════════════════════════════════════════════════════════
+plot(support,    color=color.new(color.green, 50), linewidth=1, title="Soporte")
+plot(resistance, color=color.new(color.red,   50), linewidth=1, title="Resistencia")
+plot(sma50,      color=color.new(color.blue,  60), title="SMA50")
+plot(sma200,     color=color.new(color.purple,60), title="SMA200")
+plot(ema20,      color=color.new(color.orange, 50), title="EMA20")
+
+bgcolor(btcCrashPause ? color.new(color.maroon, 80) : ddPauseActive ? color.new(color.red, 80) : isRanging ? color.new(color.gray, 95) : isBullish ? color.new(color.green, 97) : isBearish ? color.new(color.red, 97) : na)
+
+plotshape(springSignal,   title="Spring",   style=shape.triangleup, location=location.belowbar, color=color.green,  size=size.small, text="SP")
+plotshape(pullbackSignal, title="Pullback", style=shape.triangleup, location=location.belowbar, color=color.aqua,   size=size.tiny,  text="PB")
+plotshape(bounceSignal,   title="Bounce",   style=shape.triangleup, location=location.belowbar, color=color.yellow, size=size.tiny,  text="BC")
+plotshape(breakoutSignal, title="Breakout", style=shape.triangleup, location=location.belowbar, color=color.fuchsia,size=size.tiny,  text="BO")
+
+plot(strategy.position_size > 0 ? entryPrice : na, "Entry", color=color.new(color.white, 0), style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size > 0 ? stopPrice  : na, "Stop",  color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size > 0 ? tpPrice    : na, "TP",    color=color.new(color.lime, 0),  style=plot.style_linebr, linewidth=2)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABLA STATS — TOP RIGHT
+// ═══════════════════════════════════════════════════════════════════════════
+var table statsBox = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    wins   = strategy.wintrades
+    losses = strategy.losstrades
+    total  = wins + losses
+    wr     = total > 0 ? wins / total * 100 : 0.0
+    avgPnl = total > 0 ? strategy.netprofit / total : 0.0
+    pf     = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+    
+    table.cell(statsBox, 0, 0, "CO LONG v4", text_color=color.white, bgcolor=color.new(color.blue, 50))
+    table.cell(statsBox, 1, 0, modeChoice, text_color=color.aqua, bgcolor=color.new(color.blue, 50))
+    table.cell(statsBox, 0, 1, "Trade Size", text_color=color.white)
+    table.cell(statsBox, 1, 1, "$" + str.tostring(tradeSizeUSD, "#") + (hasConfluence ? " ×1.5" : ""), text_color=hasConfluence ? color.lime : color.aqua)
+    table.cell(statsBox, 0, 2, "Trades", text_color=color.white)
+    table.cell(statsBox, 1, 2, str.tostring(total), text_color=color.white)
+    table.cell(statsBox, 0, 3, "Win Rate", text_color=color.white)
+    table.cell(statsBox, 1, 3, str.tostring(wr, "#.0") + "%", text_color=wr >= 50 ? color.green : color.red)
+    table.cell(statsBox, 0, 4, "Avg PnL", text_color=color.white)
+    table.cell(statsBox, 1, 4, "$" + str.tostring(avgPnl, "#.##"), text_color=avgPnl >= 0 ? color.green : color.red)
+    table.cell(statsBox, 0, 5, "Profit Factor", text_color=color.white)
+    table.cell(statsBox, 1, 5, str.tostring(pf, "#.##"), text_color=pf >= 1.5 ? color.green : pf >= 1.0 ? color.orange : color.red)
+    table.cell(statsBox, 0, 6, "Net Profit", text_color=color.white)
+    table.cell(statsBox, 1, 6, "$" + str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.green : color.red)
+    table.cell(statsBox, 0, 7, "Setup", text_color=color.white)
+    table.cell(statsBox, 1, 7, chosenSetup != "" ? chosenSetup : "—", text_color=color.yellow)
+    table.cell(statsBox, 0, 8, "Racha pérdidas", text_color=color.white)
+    table.cell(statsBox, 1, 8, str.tostring(consecLosses) + (ddPauseActive ? " ⛔" : ""), text_color=consecLosses >= maxConsecLosses ? color.red : consecLosses >= 2 ? color.orange : color.lime)
+    table.cell(statsBox, 0, 9, "PnL diario", text_color=color.white)
+    table.cell(statsBox, 1, 9, str.tostring(dailyPnLPct, "#.##") + "%", text_color=dailyPnLPct < -dailyLossLimit ? color.red : dailyPnLPct < 0 ? color.orange : color.lime)
+    table.cell(statsBox, 0, 10, "Cooldown", text_color=color.white)
+    table.cell(statsBox, 1, 10, str.tostring(adaptiveCooldown) + " bars", text_color=color.white)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABLA MULTI-ASSET — TOP LEFT (NUEVO v4)
+// ═══════════════════════════════════════════════════════════════════════════
+var table maBox = table.new(position.top_left, 3, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast and useMultiAsset
+    table.cell(maBox, 0, 0, "🌐 Multi-Asset",  text_color=color.yellow, bgcolor=color.new(color.teal, 50))
+    table.cell(maBox, 1, 0, "Δ" + str.tostring(btcDropBars) + "b", text_color=color.yellow, bgcolor=color.new(color.teal, 50))
+    table.cell(maBox, 2, 0, "Trend", text_color=color.yellow, bgcolor=color.new(color.teal, 50))
+    
+    table.cell(maBox, 0, 1, "BTC", text_color=color.orange)
+    table.cell(maBox, 1, 1, str.tostring(btcChange, "+#.##;-#.##") + "%", text_color=btcChange >= 0 ? color.lime : color.red)
+    table.cell(maBox, 2, 1, btcBull ? "🟢" : "🔴", text_color=color.white)
+    
+    table.cell(maBox, 0, 2, "ETH", text_color=color.aqua)
+    table.cell(maBox, 1, 2, str.tostring(ethChange, "+#.##;-#.##") + "%", text_color=ethChange >= 0 ? color.lime : color.red)
+    table.cell(maBox, 2, 2, ethBull ? "🟢" : "🔴", text_color=color.white)
+    
+    table.cell(maBox, 0, 3, "SOL", text_color=color.purple)
+    table.cell(maBox, 1, 3, str.tostring(solChange, "+#.##;-#.##") + "%", text_color=solChange >= 0 ? color.lime : color.red)
+    table.cell(maBox, 2, 3, solBull ? "🟢" : "🔴", text_color=color.white)
+    
+    consensusText = bullishConsensus == 3 ? "🟢🟢🟢 FUERTE" : bullishConsensus == 2 ? "🟢🟢 OK" : bullishConsensus == 1 ? "🟡 DÉBIL" : "🔴 BAJISTA"
+    consensusColor = bullishConsensus >= 2 ? color.lime : bullishConsensus == 1 ? color.orange : color.red
+    table.cell(maBox, 0, 4, "Consenso", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(maBox, 1, 4, str.tostring(bullishConsensus) + "/3", text_color=consensusColor, bgcolor=color.new(color.gray, 60))
+    table.cell(maBox, 2, 4, consensusText, text_color=consensusColor, bgcolor=color.new(color.gray, 60))
+    
+    crashText = btcCrashPause ? "⛔ BTC CRASH" : "✅ OK"
+    crashColor = btcCrashPause ? color.red : color.lime
+    table.cell(maBox, 0, 5, "Filtro corr.", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(maBox, 1, 5, "RS:" + str.tostring(relativeStrength, "+#.##;-#.##") + "%", text_color=relativeStrength >= 0 ? color.lime : color.red, bgcolor=color.new(color.gray, 60))
+    table.cell(maBox, 2, 5, crashText, text_color=crashColor, bgcolor=color.new(color.gray, 60))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABLA ML — BOTTOM LEFT (REUBICADA)
+// ═══════════════════════════════════════════════════════════════════════════
+var table mlBox = table.new(position.bottom_left, 5, 6, bgcolor=color.new(color.black, 60), border_width=1)
+if barstate.islast and showMLTable
+    table.cell(mlBox, 0, 0, "🤖 Adaptive ML",   text_color=color.yellow, bgcolor=color.new(color.purple, 40), text_size=size.small)
+    table.cell(mlBox, 1, 0, "Wins",  text_color=color.yellow, bgcolor=color.new(color.purple, 40), text_size=size.small)
+    table.cell(mlBox, 2, 0, "Losses",text_color=color.yellow, bgcolor=color.new(color.purple, 40), text_size=size.small)
+    table.cell(mlBox, 3, 0, "WR%",   text_color=color.yellow, bgcolor=color.new(color.purple, 40), text_size=size.small)
+    table.cell(mlBox, 4, 0, "Peso",  text_color=color.yellow, bgcolor=color.new(color.purple, 40), text_size=size.small)
+    
+    table.cell(mlBox, 0, 1, "Spring",   text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 1, 1, str.tostring(springWins),   text_color=color.lime, text_size=size.small)
+    table.cell(mlBox, 2, 1, str.tostring(springLosses), text_color=color.red, text_size=size.small)
+    table.cell(mlBox, 3, 1, str.tostring(springWR * 100, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 4, 1, str.tostring(springWeight, "#.00"), text_color=springWeight > 0.55 ? color.lime : springWeight < 0.45 ? color.red : color.white, text_size=size.small)
+    
+    table.cell(mlBox, 0, 2, "Pullback", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 1, 2, str.tostring(pullbackWins),   text_color=color.lime, text_size=size.small)
+    table.cell(mlBox, 2, 2, str.tostring(pullbackLosses), text_color=color.red, text_size=size.small)
+    table.cell(mlBox, 3, 2, str.tostring(pullbackWR * 100, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 4, 2, str.tostring(pullbackWeight, "#.00"), text_color=pullbackWeight > 0.55 ? color.lime : pullbackWeight < 0.45 ? color.red : color.white, text_size=size.small)
+    
+    table.cell(mlBox, 0, 3, "Bounce",   text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 1, 3, str.tostring(bounceWins),   text_color=color.lime, text_size=size.small)
+    table.cell(mlBox, 2, 3, str.tostring(bounceLosses), text_color=color.red, text_size=size.small)
+    table.cell(mlBox, 3, 3, str.tostring(bounceWR * 100, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 4, 3, str.tostring(bounceWeight, "#.00"), text_color=bounceWeight > 0.55 ? color.lime : bounceWeight < 0.45 ? color.red : color.white, text_size=size.small)
+    
+    table.cell(mlBox, 0, 4, "Breakout", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 1, 4, str.tostring(breakoutWins),   text_color=color.lime, text_size=size.small)
+    table.cell(mlBox, 2, 4, str.tostring(breakoutLosses), text_color=color.red, text_size=size.small)
+    table.cell(mlBox, 3, 4, str.tostring(breakoutWR * 100, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(mlBox, 4, 4, str.tostring(breakoutWeight, "#.00"), text_color=breakoutWeight > 0.55 ? color.lime : breakoutWeight < 0.45 ? color.red : color.white, text_size=size.small)
+    
+    table.cell(mlBox, 0, 5, "Score actual", text_color=color.white, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    table.cell(mlBox, 1, 5, str.tostring(adaptiveScore, "#.00"), text_color=color.aqua, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    table.cell(mlBox, 2, 5, "min:", text_color=color.white, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    table.cell(mlBox, 3, 5, str.tostring(mlMinAdjusted, "#.00"), text_color=color.aqua, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    passColor = adaptiveScore >= mlMinAdjusted ? color.lime : color.red
+    table.cell(mlBox, 4, 5, adaptiveScore >= mlMinAdjusted ? "PASS" : "BLOCK", text_color=passColor, bgcolor=color.new(color.gray, 50), text_size=size.small)
+
+alertcondition(longSignal, title="🚀 Señal LONG", message="CO Adaptive v4: {{ticker}} @ {{close}}")
+alertcondition(btcCrashPause, title="⛔ BTC Crash", message="CO Adaptive v4: BTC cayó {{plot_0}}%, pausa LONGs")

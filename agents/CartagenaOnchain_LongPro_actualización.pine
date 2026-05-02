@@ -1,0 +1,280 @@
+//@version=5
+// ═══════════════════════════════════════════════════════════════════════════
+//  CARTAGENA ONCHAIN — LONG PRO TREND HUNTER
+//  "Jerga clara, blockchain espeso"
+//  Indicador LONG-ONLY · Tendencia + Pivotes + EMAs + Divergencias + Dow
+//  Risk Management: SL 0.5% · TP1 R:R 2:1 · TP2 R:R 3:1 · BE @ 1.5%
+// ═══════════════════════════════════════════════════════════════════════════
+indicator("Cartagena Onchain — LONG PRO Trend Hunter", shorttitle="CO LONG PRO", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ───────────────────────────────────────────────────────────────────────────
+grpRisk     = "🛡️ Gestión de Riesgo"
+riskPct     = input.float(0.50, "Stop Loss (% del capital)", minval=0.05, maxval=5.0, step=0.05, group=grpRisk, tooltip="Pérdida máxima por operación sobre el capital")
+rrTP1       = input.float(2.0,  "Take Profit 1 (R:R)",       minval=1.0, maxval=10.0, step=0.5,  group=grpRisk, tooltip="Primer objetivo: relación riesgo/beneficio 2:1")
+rrTP2       = input.float(3.0,  "Take Profit 2 (R:R)",       minval=1.5, maxval=15.0, step=0.5,  group=grpRisk, tooltip="Segundo objetivo: relación riesgo/beneficio 3:1")
+beTrigger   = input.float(1.5,  "Breakeven Trigger (%)",     minval=0.1, maxval=10.0, step=0.1,  group=grpRisk, tooltip="Mover SL a entrada cuando el precio avance este %")
+tp1ClosePct = input.float(50.0, "Cierre parcial en TP1 (%)", minval=10.0, maxval=90.0, step=5.0, group=grpRisk, tooltip="Porcentaje de la posición a cerrar en TP1")
+
+grpEMA     = "📈 EMAs de Tendencia"
+emaFast    = input.int(10,  "EMA Rápida",      minval=2, group=grpEMA)
+emaMid1    = input.int(55,  "EMA Media",       minval=5, group=grpEMA)
+emaMid2    = input.int(100, "EMA Estructural", minval=10, group=grpEMA)
+emaSlow    = input.int(200, "EMA Tendencia",   minval=50, group=grpEMA)
+showEMA    = input.bool(true, "Mostrar EMAs", group=grpEMA)
+
+grpPiv     = "🎯 Pivotes Estándar"
+pivPeriod  = input.string("Diario", "Período de Pivotes", options=["Diario", "Semanal", "Mensual"], group=grpPiv)
+showPivots = input.bool(true, "Mostrar Pivotes (PP, R1-R3, S1-S3)", group=grpPiv)
+
+grpDiv     = "🔱 Divergencias (RSI)"
+rsiLen     = input.int(14, "Periodo RSI", minval=2, group=grpDiv)
+pivLeft    = input.int(5,  "Pivot Left",  minval=1, group=grpDiv)
+pivRight   = input.int(5,  "Pivot Right", minval=1, group=grpDiv)
+showDivBull   = input.bool(true, "Mostrar Divergencia Alcista Regular",  group=grpDiv)
+showDivHidden = input.bool(true, "Mostrar Divergencia Alcista Oculta",   group=grpDiv)
+showBearWarn  = input.bool(true, "ALERTA: Divergencias Bajistas (NO OPERAR)", group=grpDiv, tooltip="Detecta divergencias bajistas regulares y ocultas para abstenerse de operar")
+
+grpDow     = "⏳ Teoría de Dow — Factor Tiempo"
+dowLen     = input.int(20, "Ventana de estructura (HH/HL)", minval=5, group=grpDow, tooltip="Barras para evaluar máximos/mínimos crecientes")
+minBarsTrend = input.int(15, "Barras mínimas de tendencia confirmada", minval=5, group=grpDow, tooltip="Factor tiempo: la tendencia debe persistir N barras")
+
+grpSignal  = "🚀 Señales de Entrada LONG"
+useStrict  = input.bool(true, "Modo Estricto (mayor precisión, ~80% efectividad)", group=grpSignal, tooltip="Exige confluencia: tendencia + Dow + divergencia + EMA pullback + sin alertas bajistas")
+showLabels = input.bool(true, "Mostrar etiquetas de entrada", group=grpSignal)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  EMAs — Tendencia Multi-Timeframe en el mismo gráfico
+// ───────────────────────────────────────────────────────────────────────────
+ema10  = ta.ema(close, emaFast)
+ema55  = ta.ema(close, emaMid1)
+ema100 = ta.ema(close, emaMid2)
+ema200 = ta.ema(close, emaSlow)
+
+plot(showEMA ? ema10  : na, "EMA 10",  color=color.new(#00bcd4, 0), linewidth=1)
+plot(showEMA ? ema55  : na, "EMA 55",  color=color.new(#ffeb3b, 0), linewidth=2)
+plot(showEMA ? ema100 : na, "EMA 100", color=color.new(#ff9800, 0), linewidth=2)
+plot(showEMA ? ema200 : na, "EMA 200", color=color.new(#f44336, 0), linewidth=3)
+
+// Tendencia alcista: alineación correcta de EMAs (Stack alcista)
+emaStackBull = ema10 > ema55 and ema55 > ema100 and ema100 > ema200
+emaStackBear = ema10 < ema55 and ema55 < ema100 and ema100 < ema200
+priceAboveSlow = close > ema200
+
+// ───────────────────────────────────────────────────────────────────────────
+//  PIVOTES ESTÁNDAR (Floor Pivots)
+// ───────────────────────────────────────────────────────────────────────────
+pivTF = pivPeriod == "Diario" ? "D" : pivPeriod == "Semanal" ? "W" : "M"
+[pH, pL, pC] = request.security(syminfo.tickerid, pivTF, [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+PP = (pH + pL + pC) / 3
+R1 = 2 * PP - pL
+S1 = 2 * PP - pH
+R2 = PP + (pH - pL)
+S2 = PP - (pH - pL)
+R3 = pH + 2 * (PP - pL)
+S3 = pL - 2 * (pH - PP)
+
+plot(showPivots ? PP : na, "PP", color=color.new(color.yellow, 0),  style=plot.style_circles, linewidth=2)
+plot(showPivots ? R1 : na, "R1", color=color.new(color.red, 30),    style=plot.style_circles)
+plot(showPivots ? R2 : na, "R2", color=color.new(color.red, 50),    style=plot.style_circles)
+plot(showPivots ? R3 : na, "R3", color=color.new(color.red, 70),    style=plot.style_circles)
+plot(showPivots ? S1 : na, "S1", color=color.new(color.green, 30),  style=plot.style_circles)
+plot(showPivots ? S2 : na, "S2", color=color.new(color.green, 50),  style=plot.style_circles)
+plot(showPivots ? S3 : na, "S3", color=color.new(color.green, 70),  style=plot.style_circles)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  TEORÍA DE DOW — Factor Tiempo y Estructura
+//  Tendencia primaria alcista = HH (Higher Highs) y HL (Higher Lows) sostenidos
+// ───────────────────────────────────────────────────────────────────────────
+hh = ta.highest(high, dowLen)
+ll = ta.lowest(low, dowLen)
+hhPrev = ta.highest(high[dowLen], dowLen)
+llPrev = ta.lowest(low[dowLen], dowLen)
+
+dowBullish = hh > hhPrev and ll > llPrev      // máximos y mínimos crecientes
+dowBearish = hh < hhPrev and ll < llPrev      // máximos y mínimos decrecientes
+
+// Factor tiempo: contar cuántas barras lleva la estructura alcista
+var int dowBullBars = 0
+dowBullBars := dowBullish ? dowBullBars + 1 : 0
+dowConfirmed = dowBullBars >= minBarsTrend
+
+// ───────────────────────────────────────────────────────────────────────────
+//  DIVERGENCIAS RSI — Alcistas (operables) y Bajistas (alerta de abstención)
+// ───────────────────────────────────────────────────────────────────────────
+rsi = ta.rsi(close, rsiLen)
+
+// Pivotes en precio y en RSI
+plFound = not na(ta.pivotlow(low,  pivLeft, pivRight))
+phFound = not na(ta.pivothigh(high, pivLeft, pivRight))
+rsiPL   = not na(ta.pivotlow(rsi,  pivLeft, pivRight))
+rsiPH   = not na(ta.pivothigh(rsi, pivLeft, pivRight))
+
+// Buscar divergencias dentro de un rango razonable
+lookbackR = 60
+
+// — Divergencia Alcista REGULAR: precio LL, RSI HL → giro alcista
+priceLL = low[pivRight]  < ta.valuewhen(plFound, low[pivRight], 1)
+rsiHL   = rsi[pivRight]  > ta.valuewhen(plFound, rsi[pivRight], 1)
+bullDivRegular = plFound and priceLL and rsiHL
+
+// — Divergencia Alcista OCULTA: precio HL, RSI LL → continuación alcista
+priceHL  = low[pivRight] > ta.valuewhen(plFound, low[pivRight], 1)
+rsiLL    = rsi[pivRight] < ta.valuewhen(plFound, rsi[pivRight], 1)
+bullDivHidden = plFound and priceHL and rsiLL
+
+// — Divergencia Bajista REGULAR: precio HH, RSI LH → giro bajista (NO OPERAR)
+priceHH = high[pivRight] > ta.valuewhen(phFound, high[pivRight], 1)
+rsiLH   = rsi[pivRight]  < ta.valuewhen(phFound, rsi[pivRight], 1)
+bearDivRegular = phFound and priceHH and rsiLH
+
+// — Divergencia Bajista OCULTA: precio LH, RSI HH → continuación bajista (NO OPERAR)
+priceLH = high[pivRight] < ta.valuewhen(phFound, high[pivRight], 1)
+rsiHH   = rsi[pivRight]  > ta.valuewhen(phFound, rsi[pivRight], 1)
+bearDivHidden = phFound and priceLH and rsiHH
+
+// Pintar divergencias en el gráfico
+plotshape(showDivBull   and bullDivRegular, title="Div Alcista Regular", style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0),   size=size.small, text="DIV+",  textcolor=color.white)
+plotshape(showDivHidden and bullDivHidden,  title="Div Alcista Oculta",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.aqua, 0),   size=size.small, text="DIV-O", textcolor=color.white)
+plotshape(showBearWarn  and bearDivRegular, title="Div Bajista Regular", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),    size=size.small, text="⚠️ BAJ",   textcolor=color.white)
+plotshape(showBearWarn  and bearDivHidden,  title="Div Bajista Oculta",  style=shape.triangledown, location=location.abovebar, color=color.new(color.fuchsia, 0),size=size.small, text="⚠️ BAJ-O", textcolor=color.white)
+
+// Memoria de alertas bajistas (vigentes hasta nueva confirmación alcista)
+var bool bearWarning = false
+if bearDivRegular or bearDivHidden
+    bearWarning := true
+if bullDivRegular and dowConfirmed
+    bearWarning := false
+
+// ───────────────────────────────────────────────────────────────────────────
+//  CONFIRMACIONES ADICIONALES — Pullback a EMA y vela alcista
+// ───────────────────────────────────────────────────────────────────────────
+pullbackToEMA = low <= ema10 and close > ema10           // toque a EMA10 y cierre arriba
+bullCandle    = close > open and close > (high+low)/2     // vela alcista con cuerpo en la mitad superior
+volOK         = volume > ta.sma(volume, 20)                // volumen confirmando
+
+// ───────────────────────────────────────────────────────────────────────────
+//  SEÑAL LONG (alta confluencia) — apuntando a ~80% de efectividad
+//  Filosofía: solo operar CON la tendencia primaria, con tiempo confirmado,
+//  con divergencia a favor, en pullback técnico, y SIN señales bajistas.
+// ───────────────────────────────────────────────────────────────────────────
+divBullSignal = bullDivRegular or bullDivHidden
+
+baseLong = emaStackBull and priceAboveSlow and dowConfirmed and not bearWarning
+
+longSignal = useStrict ?
+     (baseLong and divBullSignal and pullbackToEMA and bullCandle and volOK) :
+     (emaStackBull and priceAboveSlow and (divBullSignal or pullbackToEMA) and bullCandle and not bearWarning)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  GESTIÓN DE LA OPERACIÓN — SL 0.5%, TP1 2:1, TP2 3:1, BE @ 1.5%
+//  El SL en % se interpreta como % del precio (riesgo por operación);
+//  el sizing (% del capital) se calibra del lado del trader según el SL en $.
+// ───────────────────────────────────────────────────────────────────────────
+var float entryPrice = na
+var float stopPrice  = na
+var float tp1Price   = na
+var float tp2Price   = na
+var bool  inTrade    = false
+var bool  beMoved    = false
+var bool  tp1Hit     = false
+
+if longSignal and not inTrade
+    entryPrice := close
+    stopPrice  := close * (1 - riskPct/100)
+    riskDist   = entryPrice - stopPrice
+    tp1Price   := entryPrice + riskDist * rrTP1
+    tp2Price   := entryPrice + riskDist * rrTP2
+    inTrade    := true
+    beMoved    := false
+    tp1Hit     := false
+
+// Breakeven: cuando el precio supera entryPrice * (1 + beTrigger%)
+if inTrade and not beMoved and high >= entryPrice * (1 + beTrigger/100)
+    stopPrice := entryPrice
+    beMoved   := true
+
+// TP1
+if inTrade and not tp1Hit and high >= tp1Price
+    tp1Hit := true
+
+// TP2 → cierra
+if inTrade and high >= tp2Price
+    inTrade := false
+
+// SL
+if inTrade and low <= stopPrice
+    inTrade := false
+
+// Dibujar niveles activos
+plot(inTrade ? entryPrice : na, "Entry",   color=color.new(color.white, 0),  style=plot.style_linebr, linewidth=2)
+plot(inTrade ? stopPrice  : na, "Stop",    color=color.new(color.red, 0),    style=plot.style_linebr, linewidth=2)
+plot(inTrade ? tp1Price   : na, "TP1 2:1", color=color.new(color.lime, 0),   style=plot.style_linebr, linewidth=1)
+plot(inTrade ? tp2Price   : na, "TP2 3:1", color=color.new(color.green, 0),  style=plot.style_linebr, linewidth=2)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  ETIQUETAS Y FONDO
+// ───────────────────────────────────────────────────────────────────────────
+if longSignal and showLabels
+    label.new(bar_index, low, text="LONG\n@ " + str.tostring(close, format.mintick) + "\nSL " + str.tostring(stopPrice, format.mintick) + "\nTP1 " + str.tostring(tp1Price, format.mintick) + "\nTP2 " + str.tostring(tp2Price, format.mintick), color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+bgcolor(bearWarning ? color.new(color.red, 90) : na, title="Fondo: Alerta Bajista")
+bgcolor(longSignal  ? color.new(color.green, 85) : na, title="Fondo: Señal LONG")
+
+// ───────────────────────────────────────────────────────────────────────────
+//  TABLA DE STATUS — el dashboard del trader
+// ───────────────────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 70), border_color=color.new(color.gray, 50), border_width=1)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "CO LONG PRO",          text_color=color.yellow, bgcolor=color.new(color.black, 30), text_size=size.normal)
+    table.cell(dash, 1, 0, "Status",                text_color=color.yellow, bgcolor=color.new(color.black, 30), text_size=size.normal)
+
+    table.cell(dash, 0, 1, "Tendencia EMA",         text_color=color.white)
+    table.cell(dash, 1, 1, emaStackBull ? "🟢 ALCISTA" : emaStackBear ? "🔴 BAJISTA" : "🟡 LATERAL", text_color=emaStackBull ? color.lime : emaStackBear ? color.red : color.yellow)
+
+    table.cell(dash, 0, 2, "Dow (HH/HL)",           text_color=color.white)
+    table.cell(dash, 1, 2, dowConfirmed ? "🟢 CONFIRMADA" : dowBullish ? "🟡 EN FORMACIÓN" : "🔴 NO ALCISTA", text_color=dowConfirmed ? color.lime : dowBullish ? color.yellow : color.red)
+
+    table.cell(dash, 0, 3, "Barras tendencia",      text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(dowBullBars), text_color=color.white)
+
+    table.cell(dash, 0, 4, "Precio vs EMA200",      text_color=color.white)
+    table.cell(dash, 1, 4, priceAboveSlow ? "🟢 Encima" : "🔴 Debajo", text_color=priceAboveSlow ? color.lime : color.red)
+
+    table.cell(dash, 0, 5, "Divergencia Alcista",   text_color=color.white)
+    table.cell(dash, 1, 5, bullDivRegular ? "🟢 REGULAR" : bullDivHidden ? "🟢 OCULTA" : "—", text_color=(bullDivRegular or bullDivHidden) ? color.lime : color.gray)
+
+    table.cell(dash, 0, 6, "Alerta Bajista",        text_color=color.white)
+    table.cell(dash, 1, 6, bearWarning ? "⚠️ NO OPERAR" : "✅ Despejada", text_color=bearWarning ? color.red : color.lime)
+
+    table.cell(dash, 0, 7, "Posición",              text_color=color.white)
+    table.cell(dash, 1, 7, inTrade ? (tp1Hit ? "🟢 EN TP1+" : beMoved ? "🟡 BE ACTIVO" : "🔵 ABIERTA") : "⚪ FUERA", text_color=inTrade ? color.aqua : color.gray)
+
+    table.cell(dash, 0, 8, "R:R Plan",              text_color=color.white)
+    table.cell(dash, 1, 8, "SL " + str.tostring(riskPct) + "% | TP1 " + str.tostring(rrTP1) + ":1 | TP2 " + str.tostring(rrTP2) + ":1", text_color=color.silver)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  ALERTAS
+// ───────────────────────────────────────────────────────────────────────────
+alertcondition(longSignal,         title="🚀 Señal LONG (Alta Confluencia)", message="CO LONG PRO: Entrada LONG confirmada en {{ticker}} @ {{close}}. Tendencia + Dow + Divergencia + Pullback.")
+alertcondition(bearWarning,        title="⚠️ Alerta Bajista — Abstenerse",   message="CO LONG PRO: Divergencia bajista detectada en {{ticker}}. NO OPERAR LONG.")
+alertcondition(inTrade and high >= tp1Price and not tp1Hit[1], title="🎯 TP1 Alcanzado", message="CO LONG PRO: TP1 (2:1) alcanzado en {{ticker}}. Cerrar parcial y mover SL a Breakeven.")
+alertcondition(inTrade and high >= tp2Price, title="🏆 TP2 Alcanzado",       message="CO LONG PRO: TP2 (3:1) alcanzado en {{ticker}}. Cerrar posición.")
+alertcondition(bullDivRegular,     title="DIV Alcista Regular",              message="Divergencia alcista regular en {{ticker}}.")
+alertcondition(bullDivHidden,      title="DIV Alcista Oculta",               message="Divergencia alcista oculta en {{ticker}} — continuación alcista.")
+
+// ───────────────────────────────────────────────────────────────────────────
+//  DISCLAIMER (label flotante)
+// ───────────────────────────────────────────────────────────────────────────
+var label disc = na
+if barstate.islast
+    label.delete(disc)
+    disc := label.new(bar_index, low - ta.atr(14)*3,
+         text = "⚠️ DISCLAIMER\nIndicador LONG-ONLY. Si ves DIV BAJISTA (regular u oculta),\nNO operar — esperar a que la tendencia alcista se reconfirme.\nNinguna estrategia garantiza el 80%; el % depende del activo, TF\ny disciplina. Esto NO es asesoría financiera. DYOR.",
+         color = color.new(color.orange, 20),
+         textcolor = color.white,
+         style = label.style_label_up,
+         size = size.small)
