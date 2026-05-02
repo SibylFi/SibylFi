@@ -1,0 +1,15 @@
+# Foundry build artifacts
+out/
+cache/
+broadcast/
+
+# Environment variables
+.env
+llavesSC.env
+
+# Dependencies
+lib/
+node_modules/
+
+# Logs
+*.log
