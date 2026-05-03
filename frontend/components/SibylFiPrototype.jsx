@@ -349,6 +349,7 @@ function Topbar({ view, setView }) {
     { k: 'feed',        l: 'Signals' },
     { k: 'flow',        l: 'Rite' },
   ];
+  const [connected, setConnected] = useState(false);
   return (
     <header className="sf-topbar">
       <div className="sf-brand">
@@ -365,12 +366,18 @@ function Topbar({ view, setView }) {
           </button>
         ))}
       </nav>
+      <button className="sf-forge"><span className="sf-forge-plus">+</span> Forge</button>
       <div className="sf-topbar-right">
         <span className="sf-chip"><span className="sf-chip-dot" /> BASE-SEPOLIA · 12,345,901</span>
         <span className="sf-chip"><span className="sf-chip-dot" style={{ background: 'var(--sf-violet-500)', boxShadow: '0 0 8px var(--sf-violet-500)' }} /> 0G GALILEO · ONLINE</span>
-        <button className="sf-wallet">
-          <span style={{ display: 'inline-block', width: 6, height: 6, background: 'var(--sf-gold-500)', borderRadius: '50%' }} />
-          consultant.sibyl.eth
+        <button
+          className={`sf-wallet ${connected ? 'is-connected' : ''}`}
+          onClick={() => setConnected((c) => !c)}
+          title={connected ? 'Disconnect' : 'Connect wallet'}
+        >
+          <span className="sf-wallet-dot" />
+          {connected ? 'consultant.sibyl.eth' : 'Connect Wallet'}
+          {!connected && <span className="sf-wallet-chev" aria-hidden="true">›</span>}
         </button>
       </div>
     </header>
@@ -1164,7 +1171,7 @@ export default function SibylFiPrototype() {
           font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--sf-fg-mute);
           letter-spacing: 0.2em; text-transform: uppercase;
         }
-        .sf-nav { display: flex; gap: 4px; margin-left: 12px; }
+        .sf-nav { display: flex; gap: 16px; margin-left: 12px; }
         .sf-nav-item {
           padding: 8px 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
           letter-spacing: 0.15em; text-transform: uppercase; color: var(--sf-fg-dim);
@@ -1176,27 +1183,96 @@ export default function SibylFiPrototype() {
           content: ""; position: absolute; left: 14px; right: 14px; bottom: 2px; height: 1px;
           background: linear-gradient(90deg, transparent, var(--sf-gold-500), transparent);
         }
-        .sf-topbar-right { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .sf-topbar-right { margin-left: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
         .sf-chip {
+          position: relative;
           display: inline-flex; align-items: center; gap: 8px;
-          padding: 6px 12px; border: 1px solid var(--sf-border); border-radius: 2px;
+          padding: 8px 16px; border: 1px solid var(--sf-border); border-radius: 2px;
           font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.15em;
           text-transform: uppercase; color: var(--sf-fg-dim);
         }
+        .sf-chip::before, .sf-chip::after {
+          content: ""; position: absolute; width: 5px; height: 5px;
+          border: 1px solid var(--sf-gold-500); pointer-events: none;
+        }
+        .sf-chip::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+        .sf-chip::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
         .sf-chip-dot {
           width: 6px; height: 6px; border-radius: 50%;
           background: var(--sf-signal-win); box-shadow: 0 0 8px var(--sf-signal-win);
           animation: sf-pulse 2s infinite;
         }
         @keyframes sf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .sf-wallet {
-          display: inline-flex; align-items: center; gap: 10px;
-          padding: 8px 14px; border: 1px solid var(--sf-border-strong); border-radius: 2px;
-          background: linear-gradient(180deg, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02));
-          font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--sf-gold-300);
-          transition: all 0.2s;
+        .sf-forge {
+          position: relative;
+          display: inline-flex; align-items: center; gap: 6px;
+          margin-left: 4px;
+          padding: 8px 14px; border-radius: 2px;
+          border: 1px solid var(--sf-border-violet);
+          background: linear-gradient(180deg, rgba(124, 58, 237, 0.10), rgba(124, 58, 237, 0.02));
+          font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.2em;
+          text-transform: uppercase; color: var(--sf-violet-300);
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .sf-wallet:hover { border-color: var(--sf-gold-500); background: rgba(212, 175, 55, 0.12); }
+        .sf-forge::before, .sf-forge::after {
+          content: ""; position: absolute; width: 5px; height: 5px;
+          border: 1px solid var(--sf-violet-500); pointer-events: none;
+        }
+        .sf-forge::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+        .sf-forge::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+        .sf-forge:hover {
+          border-color: var(--sf-violet-500);
+          background: rgba(124, 58, 237, 0.18);
+          color: var(--sf-violet-300);
+          box-shadow: 0 0 24px rgba(124, 58, 237, 0.25);
+        }
+        .sf-forge-plus { color: var(--sf-violet-500); font-weight: 500; }
+        .sf-wallet {
+          position: relative;
+          display: inline-flex; align-items: center; gap: 10px;
+          padding: 10px 18px; border: 1px solid var(--sf-gold-500); border-radius: 2px;
+          background: linear-gradient(180deg, rgba(212, 175, 55, 0.18), rgba(212, 175, 55, 0.06));
+          font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+          letter-spacing: 0.18em; text-transform: uppercase; color: var(--sf-gold-100);
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .sf-wallet::before, .sf-wallet::after {
+          content: ""; position: absolute; width: 6px; height: 6px;
+          border: 1px solid var(--sf-gold-500); pointer-events: none;
+        }
+        .sf-wallet::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+        .sf-wallet::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+        .sf-wallet:hover {
+          background: linear-gradient(180deg, rgba(212, 175, 55, 0.28), rgba(212, 175, 55, 0.1));
+          color: var(--sf-gold-100);
+          box-shadow: 0 0 24px rgba(212, 175, 55, 0.25);
+        }
+        .sf-wallet-dot {
+          display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+          background: var(--sf-gold-500); box-shadow: 0 0 8px rgba(212, 175, 55, 0.5);
+        }
+        .sf-wallet-chev {
+          color: var(--sf-gold-300); font-size: 14px; line-height: 1;
+          margin-left: 2px; transition: transform 0.2s;
+        }
+        .sf-wallet:hover .sf-wallet-chev { transform: translateX(2px); }
+        .sf-wallet.is-connected {
+          padding: 8px 14px;
+          background: linear-gradient(180deg, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02));
+          border-color: var(--sf-border-strong);
+          color: var(--sf-gold-300);
+          font-weight: 400; letter-spacing: 0.04em; text-transform: none;
+        }
+        .sf-wallet.is-connected:hover {
+          background: rgba(212, 175, 55, 0.12);
+          border-color: var(--sf-gold-500);
+          box-shadow: 0 0 16px rgba(212, 175, 55, 0.18);
+        }
+        .sf-wallet.is-connected .sf-wallet-dot {
+          background: var(--sf-signal-win);
+          box-shadow: 0 0 8px var(--sf-signal-win);
+          animation: sf-pulse 2s infinite;
+        }
 
         /* Layout */
         .sf-main { padding: 32px 28px 80px; max-width: 1600px; width: 100%; margin: 0 auto; }
