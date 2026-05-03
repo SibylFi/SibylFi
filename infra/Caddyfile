@@ -1,15 +1,23 @@
-# SibylFi Caddy reverse proxy
-# Auto-TLS via Let's Encrypt for production hostnames; falls back to HTTP
-# for `localhost` in development.
+# SibylFi Caddy reverse proxy.
+# Auto-TLS via Let's Encrypt prod CA against `sibylfi.duckdns.org`. Direct
+# `http://<ip>/` access keeps working through the catch-all :80 block so
+# debugging on the public IP is unaffected.
 
 {
     email ops@sibylfi.app
-    # Comment out the next line for prod (uses real Let's Encrypt CA)
-    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# ─── Local development — v2 routes ───────────────────────────────────
-:80 {
+# ─── Production hostname (HTTPS, auto-TLS) ────────────────────────────
+sibylfi.duckdns.org {
+    # Prefer HTTP-01 over TLS-ALPN-01 so cert issuance works as long as
+    # port 80 is reachable, even if 443 is briefly unreachable (e.g. an SG
+    # rollout). HTTP-01 still requires port 80 inbound, which AWS already
+    # has open.
+    tls {
+        issuer acme {
+            disable_tlsalpn_challenge
+        }
+    }
     handle /api/* {
         reverse_proxy orchestrator:7100
     }
@@ -35,15 +43,26 @@
     }
 }
 
-# ─── Production hostnames ────────────────────────────────────────────
-# Uncomment when deploying to a real domain.
-#
-# sibylfi.app {
-#     handle /api/*  { reverse_proxy orchestrator:7100 }
-#     handle /demo/* { reverse_proxy orchestrator:7100 }
-#     handle         { reverse_proxy frontend:3000 }
-#     encode gzip
-# }
-#
-# swing.sibylfi.app   { reverse_proxy research-swing:7101 }
-# scalper.sibylfi.app { reverse_proxy research-scalper:7102 }
+# ─── Direct-IP fallback (HTTP only) ───────────────────────────────────
+# `curl http://16.59.145.190/...` keeps working for debugging.
+:80 {
+    handle /api/* {
+        reverse_proxy orchestrator:7100
+    }
+    handle /demo/* {
+        reverse_proxy orchestrator:7100
+    }
+    handle /signal/swing/* {
+        reverse_proxy research-swing:7101
+    }
+    handle /signal/scalper/* {
+        reverse_proxy research-scalper:7102
+    }
+    handle /verify/* {
+        reverse_proxy risk-agent:7105
+    }
+    handle {
+        reverse_proxy frontend:3000
+    }
+    encode gzip
+}
