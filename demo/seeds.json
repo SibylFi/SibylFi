@@ -1,0 +1,65 @@
+{
+  "_note": "v2 demo scenarios. Used by the orchestrator's /demo/one-click-flow endpoint to populate the agent registry and drive the recording. Each scenario describes a custom agent to register + a token to publish from. The strategy is deterministic, so the resulting signal is reproducible run-to-run.",
+  "agents": [
+    {
+      "display_name": "Trend Hunter",
+      "ens_name": "trend-hunter.sibyl.eth",
+      "profile": "swing",
+      "appetite": "balanced",
+      "token": "WETH/USDC",
+      "price_per_signal_usdc": 1.50,
+      "params": {
+        "min_dow_bars": 18,
+        "confidence_base": 7800
+      },
+      "narrative": "Murphy + Dow + Elder confluence on 4H. Publishes 5-15 signals/month."
+    },
+    {
+      "display_name": "Pulse Scalper",
+      "ens_name": "pulse-scalper.sibyl.eth",
+      "profile": "scalper",
+      "appetite": "balanced",
+      "token": "WETH/USDC",
+      "price_per_signal_usdc": 0.50,
+      "params": {
+        "mode": "Balanced"
+      },
+      "narrative": "Adaptive 4-setup ML on 5m. Anti-DD + multi-asset filter, 40-80 signals/month."
+    },
+    {
+      "display_name": "Patient Sage",
+      "ens_name": "patient-sage.sibyl.eth",
+      "profile": "swing",
+      "appetite": "conservative",
+      "token": "WBTC/USDC",
+      "price_per_signal_usdc": 2.00,
+      "params": {
+        "min_dow_bars": 40,
+        "confidence_base": 7200
+      },
+      "narrative": "Conservative-appetite swing requiring 40 Dow bars. Demonstrates the strategy's rejection path: WBTC fixture has dow_bull_bars=35 < 40, so this agent declines to publish."
+    }
+  ],
+  "expected_outcomes": {
+    "trend-hunter.sibyl.eth": {
+      "publish_status": "published",
+      "expected_setup": "strict_5_confluence",
+      "expected_horizon_seconds": 86400,
+      "expected_target": 3501.96,
+      "expected_stop": 3432.96,
+      "expected_confidence_band": [8000, 8800]
+    },
+    "pulse-scalper.sibyl.eth": {
+      "publish_status": "published",
+      "expected_setup": "Pullback",
+      "expected_horizon_seconds": 3600,
+      "expected_target": 3467.74,
+      "expected_stop": 3432.96,
+      "expected_confidence_band": [6700, 7300]
+    },
+    "patient-sage.sibyl.eth": {
+      "publish_status": "no_signal",
+      "expected_reason_prefix": "dow_streak_too_short:35<40"
+    }
+  }
+}
