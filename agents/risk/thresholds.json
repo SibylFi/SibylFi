@@ -1,8 +1,9 @@
 {
   "_note": "Profile-keyed risk thresholds. v2 long-only. Source: agent-risk.md §3-4. Profile is auto-detected from signal.horizon_seconds: <=7200s scalper, >=86400s swing, else intraday.",
+  "_position_size_note": "max_position_pct_capital is 1.0 (full capital deployable) because Elder's 1% risk-per-trade with 1% stops forces position size ≈ capital — capping at 2% was mathematically impossible. The absolute $500 USD cap (global.max_position_size_usd_cap) is what actually bounds notional risk.",
   "swing": {
     "min_rr": 2.5,
-    "max_position_pct_capital": 0.02,
+    "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.010,
     "max_slippage_bps": 150,
     "min_pool_tvl_usd": 100000,
@@ -13,7 +14,7 @@
   },
   "scalper": {
     "min_rr": 2.0,
-    "max_position_pct_capital": 0.02,
+    "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.010,
     "max_slippage_bps": 80,
     "min_pool_tvl_usd": 100000,
@@ -24,7 +25,7 @@
   },
   "intraday": {
     "min_rr": 2.0,
-    "max_position_pct_capital": 0.02,
+    "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.015,
     "max_slippage_bps": 120,
     "min_pool_tvl_usd": 100000,
