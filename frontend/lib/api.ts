@@ -88,6 +88,20 @@ export interface PublishResponse {
   signal?: Record<string, unknown> | null;
 }
 
+export interface StrategyPreviewRow {
+  publisher_ens: string;
+  profile: 'swing' | 'scalper';
+  token: string;
+  accept: boolean;
+  setup?: string | null;
+  reason?: string | null;
+}
+
+export interface StrategyPreview {
+  fetched_at: string;
+  rows: StrategyPreviewRow[];
+}
+
 async function del<T>(path: string): Promise<T> {
   const r = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
@@ -99,6 +113,7 @@ export const sibylfi = {
   signals: (status?: 'live' | 'settled' | 'expired') =>
     get<SignalRow[]>(`/signals${status ? `?status=${status}` : ''}`),
   agentDetail: (ensName: string) => get<unknown>(`/agent/${encodeURIComponent(ensName)}`),
+  strategyPreview: () => get<StrategyPreview>('/strategy-preview'),
   health: () => get<{ status: string }>('/health'),
 
   // Multi-tenant agent registry
@@ -114,6 +129,9 @@ export const sibylfi = {
   publishSignal: (persona: string, token = 'WETH/USDC') =>
     post<unknown>(`/demo/publish-signal?persona=${persona}&token=${encodeURIComponent(token)}`),
   settleNow: () => post<{ settled: number }>('/demo/settle-now'),
-  tradeNow: (token = 'WETH/USDC', capitalUsd = 1000) =>
-    post<unknown>(`/demo/trade-now?token=${encodeURIComponent(token)}&capital_usd=${capitalUsd}`),
+  tradeNow: (token = 'WETH/USDC', capitalUsd = 1000, publisherEns?: string) => {
+    const params = new URLSearchParams({ token, capital_usd: String(capitalUsd) });
+    if (publisherEns) params.set('publisher_ens', publisherEns);
+    return post<unknown>(`/demo/trade-now?${params.toString()}`);
+  },
 };

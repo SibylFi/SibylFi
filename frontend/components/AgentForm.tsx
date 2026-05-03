@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { EnsOwnershipGate, OwnershipProof } from '@/components/EnsOwnershipGate';
 import {
   AgentRecord,
   Appetite,
@@ -53,6 +54,7 @@ export function AgentForm() {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [createStatus, setCreateStatus] = useState<Status>({ kind: 'idle' });
   const [publishLog, setPublishLog] = useState<{ id: number; result: PublishResponse }[]>([]);
+  const [ownership, setOwnership] = useState<OwnershipProof | null>(null);
 
   // Load defaults whenever profile changes
   useEffect(() => {
@@ -87,7 +89,13 @@ export function AgentForm() {
     refreshList();
   }, []);
 
-  const ensName = useMemo(() => `${ensSlug.toLowerCase().replace(/[^a-z0-9-]/g, '')}.sibyl.eth`, [ensSlug]);
+  // ENS parent is `sibylfi.eth` — the project's owned Sepolia name. Subname
+  // registration via the Durin SibylFiRegistrar on Base Sepolia is a separate
+  // step; the orchestrator stores this label regardless of on-chain state.
+  const ensName = useMemo(
+    () => `${ensSlug.toLowerCase().replace(/[^a-z0-9-]/g, '')}.sibylfi.eth`,
+    [ensSlug],
+  );
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +116,17 @@ export function AgentForm() {
       token,
       appetite,
       price_per_signal_usdc: pricePerSignal,
-      params: numericParams,
+      params: {
+        ...numericParams,
+        ...(ownership
+          ? {
+              owner_address: ownership.address,
+              ownership_signature: ownership.signature,
+              ownership_message: ownership.message,
+              ens_resolves_to: ownership.ens_resolves_to,
+            }
+          : {}),
+      },
     };
 
     try {
@@ -149,8 +167,8 @@ export function AgentForm() {
       <h2>Register a Custom Research Agent</h2>
       <p className="agent-form__sub">
         Pick a strategy profile, override any params, and the orchestrator spins up a wallet-backed
-        signed-signal publisher. Built on the same rule engine that powers <code>swing.sibyl.eth</code>{' '}
-        and <code>scalper.sibyl.eth</code>.
+        signed-signal publisher. Built on the same rule engine that powers <code>swing.sibylfi.eth</code>{' '}
+        and <code>scalper.sibylfi.eth</code>.
       </p>
 
       <div className="agent-form__tabs">
@@ -227,8 +245,14 @@ export function AgentForm() {
           ))}
         </fieldset>
 
-        <button type="submit" disabled={createStatus.kind === 'loading'}>
-          {createStatus.kind === 'loading' ? 'Registering…' : 'Register agent'}
+        <EnsOwnershipGate ensName={ensName} onProof={setOwnership} />
+
+        <button type="submit" disabled={createStatus.kind === 'loading' || !ownership}>
+          {createStatus.kind === 'loading'
+            ? 'Registering…'
+            : !ownership
+              ? 'Verify ENS ownership above to register'
+              : 'Register agent'}
         </button>
 
         {createStatus.kind === 'error' && (
