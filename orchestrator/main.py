@@ -22,6 +22,10 @@ from agents.shared.db import close_pool, db_conn, init_pool
 from agents.shared.erc8004_client import ERC8004Client
 from agents.shared.logging_setup import setup_logging
 from agents.shared.settings import get_settings
+from agents.shared.strategies.feature_provider import load_features
+from agents.shared.strategies.scalper import evaluate_scalper
+from agents.shared.strategies.snapshot import ScalperParams, SwingParams
+from agents.shared.strategies.swing import evaluate_swing
 from orchestrator.custom_agents import router as custom_agents_router
 
 log = structlog.get_logger(__name__)
@@ -47,6 +51,64 @@ app.include_router(custom_agents_router)
 _settings = get_settings()
 _erc8004 = ERC8004Client()
 
+# Cache the agent → price lookup. The leaderboard polls every 5 seconds; without
+# caching we'd issue an HTTP per agent per poll. Prices change rarely (only on
+# custom-agent creation or persona-config edit), so a 60s TTL is safe.
+_PRICE_CACHE: dict[str, tuple[float, float]] = {}   # ens_name → (price, fetched_at_unix)
+_PRICE_TTL_SECONDS = 60.0
+
+
+async def _resolve_price_per_signal(ens_name: str, endpoint: str) -> Optional[float]:
+    """Return the agent's USDC price per signal, or None if it can't be resolved.
+
+    Three sources, in order:
+      1. custom_agents row (user-registered agents store price at create time)
+      2. the agent service's `/` endpoint (default personas read this from
+         PersonaConfig)
+      3. None (caller decides what fallback, if any, to display)
+    """
+    import time
+    now = time.time()
+    cached = _PRICE_CACHE.get(ens_name)
+    if cached and now - cached[1] < _PRICE_TTL_SECONDS:
+        return cached[0]
+
+    price: Optional[float] = None
+
+    # 1. custom_agents table
+    try:
+        async with db_conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT price_per_signal_usdc FROM custom_agents WHERE ens_name = %s",
+                    (ens_name,),
+                )
+                row = await cur.fetchone()
+                if row and row[0] is not None:
+                    price = float(row[0])
+    except Exception as e:
+        log.warning("price_lookup_db_failed", ens=ens_name, error=str(e))
+
+    # 2. fall through to the agent's HTTP root
+    if price is None and endpoint:
+        # `endpoint` looks like http://research-swing:7101/signal — we want the
+        # service root.
+        root = endpoint.rsplit("/", 1)[0] + "/"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(root)
+                if r.status_code == 200:
+                    body = r.json()
+                    p = body.get("price_per_signal_usdc")
+                    if p is not None:
+                        price = float(p)
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("price_lookup_http_failed", ens=ens_name, root=root, error=str(e))
+
+    if price is not None:
+        _PRICE_CACHE[ens_name] = (price, now)
+    return price
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Models
@@ -65,6 +127,7 @@ class LeaderboardEntry(BaseModel):
     roi_7d_bps: int
     capital_served_usd: float
     cold_start: bool
+    price_per_signal_usdc: Optional[float] = None
 
 
 class SignalRow(BaseModel):
@@ -115,6 +178,8 @@ async def leaderboard() -> list[LeaderboardEntry]:
                 roi_7d_bps = int(row[0] or 0)
                 capital_total = float(row[1] or 0)
 
+        price_usdc = await _resolve_price_per_signal(a.ens_name, a.endpoint)
+
         entries.append(LeaderboardEntry(
             agent_id=a.agent_id,
             ens_name=a.ens_name,
@@ -128,6 +193,7 @@ async def leaderboard() -> list[LeaderboardEntry]:
             roi_7d_bps=roi_7d_bps,
             capital_served_usd=capital_total,
             cold_start=stats.total_attestations < 5,
+            price_per_signal_usdc=price_usdc,
         ))
 
     entries.sort(key=lambda e: e.roi_7d_bps, reverse=True)
@@ -215,6 +281,69 @@ async def agent_detail(ens_name: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Strategy preview — read-only "what would publish right now"
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Runs every (core publisher × supported token) strategy in-process so the UI
+# can show buyers which combos are firing before they commit USDC. No HTTP
+# between agents, no x402, no LLM call — just feature_provider + evaluate_*.
+
+_PREVIEW_PUBLISHERS: list[tuple[str, str]] = [
+    # (publisher_ens, profile)
+    ("swing.sibylfi.eth",   "swing"),
+    ("scalper.sibylfi.eth", "scalper"),
+]
+_PREVIEW_TOKENS: list[str] = ["WETH/USDC", "WBTC/USDC", "ARB/USDC", "OP/USDC"]
+
+
+class StrategyPreviewRow(BaseModel):
+    publisher_ens: str
+    profile: str
+    token: str
+    accept: bool
+    setup: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class StrategyPreview(BaseModel):
+    fetched_at: datetime
+    rows: list[StrategyPreviewRow]
+
+
+@app.get("/api/strategy-preview")
+async def strategy_preview() -> StrategyPreview:
+    """Probe every (core publisher × token) combo. Read-only.
+
+    Computes the same gates the paid /signal endpoint runs but without
+    purchasing or signing anything. Useful as a "what's firing" dashboard
+    before committing capital through /demo/trade-now.
+    """
+    swing_params = SwingParams()
+    scalper_params = ScalperParams()
+    rows: list[StrategyPreviewRow] = []
+    for ens, profile in _PREVIEW_PUBLISHERS:
+        params = swing_params if profile == "swing" else scalper_params
+        evalfn = evaluate_swing if profile == "swing" else evaluate_scalper
+        for token in _PREVIEW_TOKENS:
+            try:
+                feat = load_features(profile, token)
+                res = evalfn(feat, params)
+                rows.append(StrategyPreviewRow(
+                    publisher_ens=ens, profile=profile, token=token,
+                    accept=res.accept,
+                    setup=res.setup if res.accept else None,
+                    reason=None if res.accept else res.reason,
+                ))
+            except Exception as e:
+                log.warning("strategy_preview_probe_failed", ens=ens, token=token, error=str(e))
+                rows.append(StrategyPreviewRow(
+                    publisher_ens=ens, profile=profile, token=token,
+                    accept=False, reason=f"probe_error:{type(e).__name__}",
+                ))
+    return StrategyPreview(fetched_at=datetime.now(timezone.utc), rows=rows)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Demo control endpoints — for the recording rig
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -222,21 +351,34 @@ async def agent_detail(ens_name: str) -> dict:
 async def demo_publish_signal(persona: str = "swing", token: str = "WETH/USDC") -> dict:
     """Trigger a Research Agent to publish a signal. Used by the demo control panel.
 
-    v2 personas: 'swing' (4H/1D, port 7101) and 'scalper' (1m/5m, port 7102).
-    Strategy may decline this bar — that returns 204 with no body.
+    Goes through the real x402 paywall using TRADING_KEY as the payer — clicking
+    this button moves real USDC on Base Sepolia (or whichever network MOCK_MODE
+    points at). Strategy may decline this bar; that surfaces as 204.
     """
+    from eth_account import Account
+    from agents.shared.x402_client import fetch_paywalled
+
     port_map = {"swing": 7101, "scalper": 7102}
     if persona not in port_map:
         raise HTTPException(status_code=400, detail=f"unknown persona: {persona}; expected swing|scalper")
     url = f"http://research-{persona}:{port_map[persona]}/signal?token={token}"
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(url, headers={"X-PAYMENT": "demo-mock-token"})
-        if r.status_code == 204:
-            return {"status": "no_signal", "reason": "strategy_declined", "persona": persona}
-        if r.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"agent returned {r.status_code}: {r.text}")
-        return r.json()
+    payer_priv_key = _settings.TRADING_KEY
+    payer_addr = Account.from_key(payer_priv_key).address
+
+    try:
+        result = await fetch_paywalled(
+            url=url,
+            payer_addr=payer_addr,
+            payer_priv_key=payer_priv_key,
+            method="GET",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if result.body is None:
+        return {"status": "no_signal", "reason": "strategy_declined", "persona": persona}
+    return result.body
 
 
 @app.post("/demo/settle-now")
@@ -248,12 +390,22 @@ async def demo_settle_now() -> dict:
 
 
 @app.post("/demo/trade-now")
-async def demo_trade_now(token: str = "WETH/USDC", capital_usd: float = 1000.0) -> dict:
-    """Trigger the trading agent to discover and trade. Used during demo recording."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(
-            f"http://trading-agent:7104/trade?token={token}&capital_usd={capital_usd}"
-        )
+async def demo_trade_now(
+    token: str = "WETH/USDC",
+    capital_usd: float = 1000.0,
+    publisher_ens: Optional[str] = None,
+) -> dict:
+    """Trigger the trading agent to discover and trade. Used during demo recording.
+
+    publisher_ens (optional): pin the buy to a specific Research Agent ENS,
+    e.g. "swing.sibylfi.eth". Without it, trade-now picks the highest-
+    reputation agent.
+    """
+    params = {"token": token, "capital_usd": capital_usd}
+    if publisher_ens:
+        params["publisher_ens"] = publisher_ens
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        r = await client.post("http://trading-agent:7104/trade", params=params)
         return r.json()
 
 
