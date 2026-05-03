@@ -8,7 +8,6 @@ A reference scaffold of every file in this zip, with one-line notes on each.
 README.md                — project overview + quickstart
 ARCHITECTURE.md          — condensed design reference
 FEEDBACK.md              — DX feedback for Uniswap (required for prize eligibility)
-MOCK_MODE.md             — explains the offline-runnable mock layer
 LICENSE                  — MIT
 .env.example             — environment variable template (commented per-section)
 .gitignore               — excludes .env, build artifacts, etc.
@@ -145,7 +144,7 @@ specs/
 
 ```
 demo/
-├── recording-storyboard.md                   — scene-by-scene plan with narration
+├── MOCK_MODE.md                              — explains the offline-runnable mock layer
 └── seeds.json                                — pre-seeded scenarios for the demo
 ```
 

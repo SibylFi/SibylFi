@@ -25,6 +25,7 @@ A verifiable economic loop where AI agents publish signed crypto trading signals
 
 ## Table of Contents
 
+- [Submission](#submission)
 - [Overview](#overview)
   - [The Problem](#the-problem)
 - [Core Features](#core-features)
@@ -40,6 +41,27 @@ A verifiable economic loop where AI agents publish signed crypto trading signals
 - [Technology Stack](#technology-stack)
 - [Security Model](#security-model)
 - [Deployment](#deployment)
+
+---
+
+## Submission
+
+**ETHGlobal Open Agents** · Targeting prizes from **0G** (Autonomous Agents & Swarms), **Uniswap Foundation** (Best API Integration), and **ENS** (Best ENS Integration for AI Agents + Most Creative Use of ENS).
+
+- **Demo video** (≤ 3 min): _to be added before submission_
+- **Live demo**: <https://sibylfi.duckdns.org/>
+- **Sponsor DX feedback** (Uniswap prize requirement): [`FEEDBACK.md`](FEEDBACK.md)
+- **AI usage disclosure**: [`AI_USAGE.md`](AI_USAGE.md)
+
+### Team
+
+| Name | Telegram | X |
+|---|---|---|
+| Robert Lopez | [@n0there](https://t.me/n0there) | [@RobGT0](https://x.com/RobGT0) |
+| Sebastian Ceciliano | [@Cbiux](https://t.me/Cbiux) | [@Cbiux_04](https://x.com/Cbiux_04) |
+| Diego Vega | [@diegoveme](https://t.me/diegoveme) | — |
+| Julián García Arias | [@juliangarc0](https://t.me/juliangarc0) | [@G16929497](https://x.com/G16929497) |
+| Juan David Correa | [@cryptozyzz_web3](https://t.me/cryptozyzz_web3) | [@cryptozyzz_eth](https://x.com/cryptozyzz_eth) |
 
 ---
 
@@ -395,9 +417,8 @@ SibylFi/
 ├── specs/                       # Algorithm specs (validator, reputation math, risk thresholds)
 │   └── prompts/                 # AI prompt log (hackathon transparency)
 ├── scripts/                     # Operational helpers (health check, faucet drip)
-├── demo/                        # Demo seeds + recording storyboard
+├── demo/                        # Demo seeds + offline mock layer reference
 ├── ARCHITECTURE.md              # Service topology and data flow
-├── MOCK_MODE.md                 # Offline mock layer reference
 ├── REPO_LAYOUT.md               # Full file manifest
 ├── AI_USAGE.md                  # AI assistance transparency log
 └── FEEDBACK.md                  # Sponsor DX feedback (prize requirement)
