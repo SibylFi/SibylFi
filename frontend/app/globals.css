@@ -62,16 +62,112 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--sf-void-400); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--sf-violet-700); }
 
-/* ─── Custom Agent Registration form (v2) ──────────────────────────── */
-.agent-form {
-  max-width: 920px;
-  margin: 32px auto 64px;
-  padding: 28px 32px;
-  background: var(--sf-surface);
-  border: 1px solid var(--sf-border-violet);
-  border-radius: 12px;
-  font-family: 'Inter', system-ui, sans-serif;
+/* ─── /forge page ───────────────────────────────────────────────────── */
+.forge-page {
+  min-height: 100vh;
+  background: var(--sf-bg-deep);
+  color: var(--sf-fg);
+  position: relative;
 }
+/* subtle violet-gold halo behind the form, no animated cosmos */
+.forge-page::before {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 40% at 50% -10%, rgba(124, 58, 237, 0.18), transparent 60%),
+    radial-gradient(ellipse 50% 30% at 80% 110%, rgba(212, 175, 55, 0.10), transparent 70%);
+}
+
+.forge-bar {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 24px;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--sf-border);
+  background: linear-gradient(180deg, rgba(10, 6, 18, 0.85), rgba(10, 6, 18, 0.5));
+  backdrop-filter: blur(12px);
+}
+.forge-bar__brand {
+  display: inline-flex; align-items: center; gap: 12px;
+  text-decoration: none;
+}
+.forge-bar__name {
+  font-family: 'Cinzel', serif; font-weight: 600; font-size: 18px;
+  letter-spacing: 0.18em; color: var(--sf-gold-300); text-transform: uppercase;
+}
+.forge-bar__name em { font-style: normal; color: var(--sf-violet-300); }
+.forge-bar__back {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--sf-fg-dim); text-decoration: none;
+  padding: 8px 14px; border: 1px solid var(--sf-border); border-radius: 2px;
+  transition: all 0.2s;
+}
+.forge-bar__back:hover {
+  color: var(--sf-gold-300); border-color: var(--sf-border-strong);
+  background: rgba(212, 175, 55, 0.04);
+}
+
+.forge-intro {
+  position: relative; z-index: 2;
+  max-width: 1100px;
+  margin: 56px auto 32px;
+  padding: 0 40px;
+}
+.forge-eyebrow {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--sf-violet-300); margin-bottom: 12px;
+}
+.forge-title {
+  font-family: 'Cinzel', serif; font-weight: 500;
+  font-size: clamp(28px, 4.4vw, 44px);
+  line-height: 1.1; letter-spacing: -0.005em;
+  color: var(--sf-fg); margin: 0;
+}
+.forge-lede {
+  font-family: 'Inter', sans-serif;
+  font-size: 15px; line-height: 1.6; color: var(--sf-fg-dim);
+  max-width: 64ch; margin: 16px 0 0;
+}
+.forge-lede code {
+  color: var(--sf-gold-300);
+  background: rgba(26, 15, 46, 0.6);
+  padding: 1px 6px; border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace; font-size: 13px;
+}
+
+/* Outer shell that aligns the AgentForm horizontally with .sf-main above. */
+.agent-form-shell {
+  position: relative;
+  z-index: 2;
+  padding: 0 28px 0;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ─── Custom Agent Registration form (v2) ──────────────────────────── */
+/* The SibylFiPrototype's cosmos + grain layers are position:fixed at z-index
+   0 and 1 over the whole viewport. Without an explicit positive z-index here
+   the form gets buried behind the dark cosmos as soon as the user scrolls
+   past 100vh. Matching .sf-app's stacking (z-index: 2) keeps it on top. */
+.agent-form {
+  position: relative;
+  z-index: 2;
+  max-width: 1100px;
+  margin: 0 auto 80px;
+  padding: 32px 40px;
+  background: linear-gradient(180deg, rgba(26, 15, 46, 0.7), rgba(16, 10, 28, 0.5));
+  border: 1px solid var(--sf-border-violet);
+  border-radius: 4px;
+  font-family: 'Inter', system-ui, sans-serif;
+  backdrop-filter: blur(6px);
+}
+.agent-form::before, .agent-form::after {
+  content: ""; position: absolute; width: 8px; height: 8px;
+  border: 1px solid var(--sf-gold-500); pointer-events: none;
+}
+.agent-form::before { top: -1px; left:  -1px; border-right: none; border-bottom: none; }
+.agent-form::after  { bottom: -1px; right: -1px; border-left:  none; border-top:    none; }
 .agent-form h2 {
   font-family: 'Cinzel', serif;
   color: var(--sf-gold-300);
@@ -209,3 +305,68 @@ html, body {
 .agent-form__row-actions button:hover { background: var(--sf-violet-600); }
 .agent-form__publog { padding-left: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .agent-form__publog code { color: var(--sf-fg-dim); }
+
+/* ─── ENS ownership gate (inside AgentForm) ────────────────────────── */
+.ens-gate {
+  margin: 18px 0 14px;
+  padding: 16px 18px;
+  border-radius: 4px;
+  border: 1px solid var(--sf-border-violet);
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.06), rgba(16, 10, 28, 0.4));
+  position: relative;
+}
+.ens-gate--ok  { border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(180deg, rgba(74, 222, 128, 0.06), rgba(16, 10, 28, 0.4)); }
+.ens-gate--err { border-color: rgba(248, 113, 113, 0.45); background: linear-gradient(180deg, rgba(248, 113, 113, 0.06), rgba(16, 10, 28, 0.4)); }
+.ens-gate__title {
+  font-family: 'Cinzel', serif;
+  color: var(--sf-violet-300);
+  font-size: 14px; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.ens-gate--ok .ens-gate__title  { color: var(--sf-signal-win); }
+.ens-gate--err .ens-gate__title { color: var(--sf-signal-loss); }
+.ens-gate__sub {
+  margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--sf-fg-dim);
+}
+.ens-gate__sub code {
+  color: var(--sf-gold-300);
+  background: var(--sf-void-200);
+  padding: 1px 6px; border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+}
+.ens-gate__actions {
+  display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px;
+}
+.ens-gate__btn {
+  /* override .agent-form button to a violet variant for the gate */
+  padding: 9px 16px !important;
+  background: var(--sf-violet-700) !important;
+  color: var(--sf-fg) !important;
+  border: 1px solid var(--sf-violet-500) !important;
+  border-radius: 3px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 11px !important; letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.ens-gate__btn:hover:not(:disabled) {
+  background: var(--sf-violet-600) !important;
+  box-shadow: 0 0 18px rgba(124, 58, 237, 0.35);
+}
+.ens-gate__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ens-gate__btn--secondary {
+  background: transparent !important;
+  color: var(--sf-fg-dim) !important;
+  border-color: var(--sf-border) !important;
+}
+.ens-gate__btn--secondary:hover {
+  color: var(--sf-fg) !important; border-color: var(--sf-fg-dim) !important;
+  box-shadow: none;
+}
+.ens-gate--ok .ens-gate__btn:not(.ens-gate__btn--secondary) {
+  background: rgba(74, 222, 128, 0.18) !important;
+  border-color: var(--sf-signal-win) !important;
+  color: var(--sf-signal-win) !important;
+}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
+import Link from 'next/link';
 import { sibylfi } from '../lib/api';
+import { WalletButton } from './WalletButton';
 
 // ─────────────────────────────────────────────────────────────────────
 // AGENT / SIGNAL MAPPING  — converts API responses → component shape
@@ -19,6 +21,7 @@ function mapAgent(entry, rank, rankPrev) {
   const i = (rank - 1) % FALLBACK_SIGILS.length;
   return {
     id:               entry.ens_name,
+    agentId:          entry.agent_id,
     name:             prefix.charAt(0).toUpperCase() + prefix.slice(1) + ' Agent',
     ens:              entry.ens_name,
     addr:             entry.address ? entry.address.slice(0, 6) + '…' + entry.address.slice(-4) : '0x???',
@@ -32,7 +35,7 @@ function mapAgent(entry, rank, rankPrev) {
     signalsEmitted:   entry.total_attestations || 0,
     signalsValidated: (entry.wins || 0) + (entry.losses || 0),
     capitalServed:    entry.capital_served_usd || 0,
-    pricePerSignal:   0.50,
+    pricePerSignal:   typeof entry.price_per_signal_usdc === 'number' ? entry.price_per_signal_usdc : null,
     horizonAvg:       'N/A',
     confidence:       5000,
     reputation:       entry.reputation_score || 0,
@@ -84,6 +87,7 @@ function mapSignal(row) {
 const fmtPct = (v, dp = 1) => `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
 const fmtUsd = (v) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(2)}`;
 const fmtBps = (v) => `${v >= 0 ? '+' : ''}${v} bps`;
+const fmtPrice = (v) => typeof v === 'number' ? `$${v.toFixed(2)}` : '$—';
 const fmtSeconds = (s) => {
   if (s <= 0) return '00:00';
   const m = Math.floor(s / 60);
@@ -365,20 +369,14 @@ function Topbar({ view, setView }) {
             {l}
           </button>
         ))}
+        <Link href="/forge" className="sf-nav-item sf-nav-item--ext">
+          Forge
+        </Link>
       </nav>
-      <button className="sf-forge"><span className="sf-forge-plus">+</span> Forge</button>
       <div className="sf-topbar-right">
-        <span className="sf-chip"><span className="sf-chip-dot" /> BASE-SEPOLIA · 12,345,901</span>
-        <span className="sf-chip"><span className="sf-chip-dot" style={{ background: 'var(--sf-violet-500)', boxShadow: '0 0 8px var(--sf-violet-500)' }} /> 0G GALILEO · ONLINE</span>
-        <button
-          className={`sf-wallet ${connected ? 'is-connected' : ''}`}
-          onClick={() => setConnected((c) => !c)}
-          title={connected ? 'Disconnect' : 'Connect wallet'}
-        >
-          <span className="sf-wallet-dot" />
-          {connected ? 'consultant.sibyl.eth' : 'Connect Wallet'}
-          {!connected && <span className="sf-wallet-chev" aria-hidden="true">›</span>}
-        </button>
+        <span className="sf-chip"><span className="sf-chip-dot" /> BASE-SEPOLIA</span>
+        <span className="sf-chip"><span className="sf-chip-dot" style={{ background: 'var(--sf-violet-500)', boxShadow: '0 0 8px var(--sf-violet-500)' }} /> 0G GALILEO</span>
+        <WalletButton />
       </div>
     </header>
   );
@@ -402,30 +400,11 @@ function Leaderboard({ agents: agentsProp, onAgentSelect }) {
     return () => clearInterval(t);
   }, []);
 
+  // Tick only drives the horizon countdown — ROI values come straight from the
+  // API (no fake jitter), and "recent" is set by the parent when a real
+  // settlement lands.
   useEffect(() => {
     if (tick === 0) return;
-    setAgents((prev) => {
-      const next = prev.map((a) => ({
-        ...a,
-        roi7d: Math.max(-10, a.roi7d + (Math.random() - 0.48) * 0.3),
-      }));
-      if (tick % 3 === 0) {
-        const idx = Math.floor(Math.random() * next.length);
-        const delta = (Math.random() - 0.3) * 4;
-        next[idx] = { ...next[idx], roi7d: next[idx].roi7d + delta, signalsValidated: next[idx].signalsValidated + 1 };
-        setRecent({
-          id: next[idx].id,
-          name: next[idx].name,
-          delta,
-          token: ['WETH', 'WBTC', 'ARB', 'OP', 'LINK'][Math.floor(Math.random() * 5)],
-        });
-      }
-      const ranked = [...next].sort((a, b) => b.roi7d - a.roi7d).map((a, i) => {
-        const oldRank = prev.find((p) => p.id === a.id).rank;
-        return { ...a, rankPrev: oldRank, rank: i + 1 };
-      });
-      return ranked;
-    });
     setHorizon((h) => Math.max(0, h - 3));
   }, [tick]);
 
@@ -445,6 +424,14 @@ function Leaderboard({ agents: agentsProp, onAgentSelect }) {
             Every signal you read here was paid for, executed, and judged by the Validator on-chain.
             The ranking below reorders as prophecies settle — no edits, no retroactive grading.
           </div>
+          <Link href="/forge" className="sf-cta-forge">
+            <span className="sf-cta-forge__glyph">+</span>
+            <span>
+              <span className="sf-cta-forge__title">Become a sibyl</span>
+              <span className="sf-cta-forge__sub">forge your own signed-signal publisher</span>
+            </span>
+            <span className="sf-cta-forge__arrow">→</span>
+          </Link>
         </div>
         <div className="sf-card sf-card-gold" style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <Stat label="VALIDATED · 7D" value={totalSignals.toLocaleString()} />
@@ -474,7 +461,9 @@ function Leaderboard({ agents: agentsProp, onAgentSelect }) {
         ) : (
           <span className="sf-dim">awaiting attestation…</span>
         )}
-        <span style={{ marginLeft: 'auto', color: 'var(--sf-fg-mute)' }}>tx 0x8a4f…91c2 · block 12,345,901</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--sf-fg-mute)' }}>
+          {recent ? '↳ on-chain attestation' : 'feed empty'}
+        </span>
       </div>
 
       {/* Leaderboard table */}
@@ -484,8 +473,12 @@ function Leaderboard({ agents: agentsProp, onAgentSelect }) {
             <div key={i} className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.2em' }}>{h}</div>
           ))}
         </div>
-        <div style={{ position: 'relative', height: agents.length * 110 + 8 }}>
-          {agents.map((a) => {
+        <div style={{ position: 'relative', height: agents.length === 0 ? 120 : agents.length * 110 + 8 }}>
+          {agents.length === 0 ? (
+            <div className="sf-mono sf-dim" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+              loading agents from registry…
+            </div>
+          ) : agents.map((a) => {
             const rankIndex = a.rank - 1;
             return (
               <LeaderboardRow
@@ -623,9 +616,11 @@ function AgentProfile({ agentId, agents, signals: signalsProp, onBack, onBuy }) 
             {agent.epigraph}
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 24, flexWrap: 'wrap' }}>
-            <span className="sf-tag sf-tag--gold">ENSIP-25 · VERIFIED</span>
-            <span className="sf-tag sf-tag--violet">ERC-8004 · ID #{agent.reputation}</span>
-            {agent.cold && <span className="sf-tag">NEWCOMER</span>}
+            <span className="sf-tag sf-tag--violet">ERC-8004 · AGENT #{agent.agentId ?? '—'}</span>
+            {agent.cold && <span className="sf-tag">COLD START</span>}
+            {(agent.signalsValidated || 0) > 0 && (
+              <span className="sf-tag sf-tag--gold">{agent.signalsValidated} ATTESTATIONS</span>
+            )}
           </div>
         </div>
 
@@ -635,7 +630,7 @@ function AgentProfile({ agentId, agents, signals: signalsProp, onBack, onBuy }) 
           <BigStat label="REPUTATION" value={agent.reputation} accent="gold" />
           <BigStat label="SIGNALS" value={agent.signalsValidated.toLocaleString()} />
           <button className="sf-btn sf-btn-primary" style={{ gridColumn: 'span 2', justifyContent: 'center' }} onClick={() => onBuy(agent.id)}>
-            ⬢ Consult the Sibyl · ${agent.pricePerSignal.toFixed(2)}
+            ⬢ Consult the Sibyl · {fmtPrice(agent.pricePerSignal)}
           </button>
         </div>
       </div>
@@ -658,16 +653,14 @@ function AgentProfile({ agentId, agents, signals: signalsProp, onBack, onBuy }) 
           <SectionHead eyebrow="✦ ON-CHAIN IDENTITY" title="Verification" accent="violet" />
           <div style={{ display: 'grid', gap: 14 }}>
             <KV k="ENS" v={agent.ens} mono accent={agent.color} />
-            <KV k="REGISTRY" v="ERC-8004 v1.0" />
+            <KV k="REGISTRY" v={`ERC-8004 v1.0 · #${agent.agentId ?? '—'}`} mono />
             <KV k="ADDRESS" v={agent.addr} mono />
-            <KV k="A2A CARD" v="/.well-known/agent-card.json" mono accent="var(--sf-violet-300)" />
-            <KV k="THESIS" v={agent.archetype.toLowerCase()} mono />
-            <KV k="0G COMPUTE" v="qwen3.6-plus" mono />
-            <KV k="x402 ENDPOINT" v="/signal · paywalled" mono />
+            <KV k="STRATEGY" v={(agent.archetype || '').toLowerCase()} mono />
+            <KV k="x402 PRICE" v={`${fmtPrice(agent.pricePerSignal)} USDC / signal`} mono />
           </div>
-          <div style={{ marginTop: 20, padding: 14, background: 'rgba(124, 58, 237, 0.06)', border: '1px dashed var(--sf-border-violet)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--sf-violet-300)', lineHeight: 1.6 }}>
-            ↔ TEXT RECORD MATCHES IDENTITY REGISTRY ENTRY<br />
-            <span className="sf-dim">ENSIP-25 bidirectional verification: PASS</span>
+          <div style={{ marginTop: 20, padding: 14, background: 'rgba(124, 58, 237, 0.06)', border: '1px dashed var(--sf-border-violet)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--sf-fg-dim)', lineHeight: 1.6 }}>
+            <span className="sf-violet">{(agent.signalsValidated || 0) > 0 ? '✓ on-chain attestations exist' : '⏳ awaiting first attestation'}</span><br />
+            <span className="sf-dim">reputation updates from validator settlement only</span>
           </div>
         </div>
       </div>
@@ -775,6 +768,11 @@ function SignalFeed({ agents, signals: signalsProp, onAgentSelect, onBuy }) {
             <div key={i} className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.2em' }}>{h}</div>
           ))}
         </div>
+        {filtered.length === 0 && (
+          <div className="sf-mono sf-dim" style={{ padding: '32px 24px', textAlign: 'center', fontSize: 12, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+            no signals match this filter — agents publish on each strategy tick
+          </div>
+        )}
         {filtered.map((s) => {
           const a = (agents || []).find((x) => x.id === s.publisher);
           if (!a) return null;
@@ -817,7 +815,7 @@ function SignalFeed({ agents, signals: signalsProp, onAgentSelect, onBuy }) {
               </div>
               <div style={{ textAlign: 'right' }}>
                 {s.status === 'live' ? (
-                  <button className="sf-btn sf-btn-sm sf-btn-violet" onClick={() => onBuy(a.id)}>BUY · ${a.pricePerSignal}</button>
+                  <button className="sf-btn sf-btn-sm sf-btn-violet" onClick={() => onBuy(a.id)}>BUY · {fmtPrice(a.pricePerSignal)}</button>
                 ) : <span className="sf-mono sf-dim" style={{ fontSize: 11 }}>—</span>}
               </div>
             </div>
@@ -831,38 +829,111 @@ function SignalFeed({ agents, signals: signalsProp, onAgentSelect, onBuy }) {
 // ─────────────────────────────────────────────────────────────────────
 // SIGNAL FLOW — the rite
 // ─────────────────────────────────────────────────────────────────────
-function SignalFlow({ onBack, agentId, agents }) {
+// Pause helper — the real x402+swap call lands sub-second on a warm node, but
+// flashing the whole rite in 200ms reads as fake. A small inter-station pause
+// lets each station register visually before the next one lights up.
+const _pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function SignalFlow({ onBack, agentId, agents, signals }) {
   const agentList = agents || [];
   const agent = agentList.find((a) => a.id === agentId) || agentList[0] || {
-    sigil: 'reversal', color: '#d4af37', name: 'Oracle', ens: 'oracle.sibyl.eth',
-    rank: 1, reputation: 0, pricePerSignal: 0.50,
+    sigil: 'reversal', color: '#d4af37', name: 'Oracle', ens: 'oracle.sibylfi.eth',
+    rank: 1, reputation: 0, pricePerSignal: null,
   };
-  const sig = {
-    id: '0x4e9f3a18b22ec10a',
-    shortId: '0x4e9f...c10a',
-    token: 'WETH/USDC',
-    direction: 'long',
-    refPrice: 3450.21,
-    targetPrice: 3485.00,
-    stopPrice: 3430.00,
-    horizon: 3600,
-    confidence: 6700,
-    publishedAtBlock: 12345678,
-    signature: '0x8f4a92e3...c1ed2b07',
-  };
+
+  // Prefer the most recent real signal from this agent; fall back to a clearly
+  // labeled placeholder if none has been published yet.
+  const realSignal = (signals || []).find((s) => s.publisher === agent.id);
+  const sig = realSignal
+    ? {
+        shortId:   realSignal.id,
+        token:     realSignal.token,
+        direction: realSignal.direction,
+        refPrice:  realSignal.refPrice,
+        targetPrice: realSignal.targetPrice,
+        stopPrice: realSignal.stopPrice,
+        horizon:   realSignal.horizon,
+        confidence: realSignal.confidence,
+        isReal:    true,
+      }
+    : {
+        shortId: '—',
+        token: 'WETH/USDC',
+        direction: 'long',
+        refPrice: 0, targetPrice: 0, stopPrice: 0,
+        horizon: 3600,
+        confidence: 0,
+        isReal: false,
+      };
   const [stage, setStage] = useState(0);
+  const [rite, setRite] = useState({ running: false, error: null, result: null });
+
+  // Pre-flight Rite parameters. Defaults: the agent that landed us on this
+  // page, its token, and a small testnet capital. The user can override any
+  // of these before clicking "Begin the rite".
+  const [pubEns, setPubEns]       = useState(agent?.ens || 'swing.sibylfi.eth');
+  const [token, setToken]         = useState(agent?.token || 'WETH/USDC');
+  const [capital, setCapital]     = useState(2);
+
+  // Strategy preview: which (publisher × token) combos are currently firing.
+  // Refreshed on mount + when the user clicks "↻ refresh" or selects a combo.
+  const [preview, setPreview] = useState({ rows: null, fetchedAt: null, loading: false });
+  const refreshPreview = async () => {
+    setPreview((p) => ({ ...p, loading: true }));
+    try {
+      const data = await sibylfi.strategyPreview();
+      setPreview({ rows: data.rows, fetchedAt: data.fetched_at, loading: false });
+    } catch (e) {
+      setPreview({ rows: null, fetchedAt: null, loading: false });
+    }
+  };
+  useEffect(() => { refreshPreview(); }, []);
+  // The two seeded core agents — usable by anyone, no special wallet needed.
+  // Custom agents from the registry would extend this list automatically.
+  const coreAgents = [
+    { ens: 'swing.sibylfi.eth',   label: 'Swing Oracle',   desc: '4H/1D · trend confluence' },
+    { ens: 'scalper.sibylfi.eth', label: 'Scalper Oracle', desc: '5m · pullback / breakout' },
+  ];
+  const supportedTokens = ['WETH/USDC', 'WBTC/USDC', 'ARB/USDC', 'OP/USDC'];
 
   const stations = [
     { key: 'discover', label: 'Discover', desc: 'ERC-8004 IdentityRegistry · rank by reputation' },
     { key: 'pay',      label: 'x402 · Payment Required', desc: 'USDC micropayment · Base Sepolia' },
-    { key: 'receive',  label: 'Signal Received', desc: 'Signed JSON · 0G Compute provenance' },
+    { key: 'receive',  label: 'Signal Received', desc: 'EIP-191 signed JSON · publisher key recovered' },
     { key: 'risk',     label: 'Risk Agent · Verify', desc: 'Position size · slippage · vol bound' },
-    { key: 'execute',  label: 'Uniswap Swap', desc: 'Trading API · Permit2 · Universal Router v2' },
-    { key: 'settle',   label: 'Validator Attests', desc: 'TWAP read · PnL deterministic · ERC-8004 write' },
+    { key: 'execute',  label: 'Uniswap Swap', desc: 'V3 SwapRouter02 · Base Sepolia · Trading API ref-quote' },
+    { key: 'settle',   label: 'Validator Attests', desc: 'Uniswap V3 TWAP · PnL deterministic · ERC-8004 write' },
   ];
 
-  const advance = () => setStage((s) => Math.min(stations.length, s + 1));
-  const reset = () => setStage(0);
+  const runRite = async () => {
+    setRite({ running: true, error: null, skipped: null, result: null });
+    setStage(1);                                 // Discover (we already have the leaderboard)
+    try {
+      await _pause(500);
+      setStage(2);                               // x402 paywall hits
+      const trade = await sibylfi.tradeNow(token, capital, pubEns);
+      // tradeNow does the full discover→buy→risk→swap loop on the server
+      if (trade?.skipped_reason) {
+        // The pipeline reached the strategy and was honestly told "not now" —
+        // not a failure, just live-market state. Surface it as a calm halt.
+        setRite({ running: false, error: null, skipped: trade.skipped_reason, result: trade });
+        return;
+      }
+      setStage(3);                               // Signal received (verified server-side)
+      await _pause(450);
+      setStage(4);                               // Risk Agent verified
+      await _pause(450);
+      setStage(5);                               // Swap mined
+      await _pause(450);
+      const settle = await sibylfi.settleNow();  // Validator attests on any expired signals
+      setStage(6);
+      setRite({ running: false, error: null, skipped: null, result: { trade, settle } });
+    } catch (err) {
+      setRite({ running: false, error: err?.message || String(err), skipped: null, result: null });
+    }
+  };
+
+  const reset = () => { setStage(0); setRite({ running: false, error: null, skipped: null, result: null }); };
 
   return (
     <div style={{ display: 'grid', gap: 24 }}>
@@ -872,12 +943,17 @@ function SignalFlow({ onBack, agentId, agents }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 32 }}>
         <div className="sf-card sf-card-gold" style={{ padding: 32 }}>
-          <div className="sf-eyebrow sf-eyebrow-violet">⌬ THE RITE OF DIVINATION</div>
+          <div className="sf-eyebrow sf-eyebrow-violet">⌬ THE RITE OF DIVINATION · LIFECYCLE TRACE</div>
           <h1 className="sf-h1" style={{ marginTop: 8, fontSize: 40 }}>
             Buy a signal. <em>Watch the rite.</em>
           </h1>
           <div className="sf-lede" style={{ marginTop: 12, maxWidth: '100%' }}>
-            Six stations from request to attestation. Every step is paid, signed, and on-chain where it matters.
+            Six stations from request to attestation. Each step is paid, signed, and on-chain where it matters.
+            {!sig.isReal && (
+              <span className="sf-mono sf-dim" style={{ display: 'block', marginTop: 8, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                ◇ no live signal from this agent yet — trace shows the lifecycle conceptually
+              </span>
+            )}
           </div>
 
           <div style={{ marginTop: 32, position: 'relative' }}>
@@ -894,15 +970,173 @@ function SignalFlow({ onBack, agentId, agents }) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 12, marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--sf-border)' }}>
-            <button className="sf-btn sf-btn-primary" onClick={advance} disabled={stage >= stations.length} style={stage >= stations.length ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
-              {stage === 0 ? '⬢ Begin the rite' : stage >= stations.length ? '✓ Rite complete' : '▸ Advance'}
-            </button>
-            <button className="sf-btn sf-btn-ghost" onClick={reset}>↺ Reset</button>
-            <div style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--sf-fg-mute)', alignSelf: 'center' }}>
-              station {Math.min(stage + 1, stations.length)} / {stations.length}
+          <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--sf-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div className="sf-eyebrow">◊ STRATEGY PREVIEW · what would publish right now</div>
+              <button
+                type="button"
+                className="sf-btn sf-btn-ghost"
+                onClick={refreshPreview}
+                disabled={preview.loading || rite.running}
+                style={{ fontSize: 10, padding: '4px 10px' }}
+              >
+                {preview.loading ? '◌ probing…' : '↻ refresh'}
+              </button>
+            </div>
+            <div style={{ background: 'var(--sf-bg-ghost)', border: '1px solid var(--sf-border)', padding: 12, marginBottom: 20, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, lineHeight: 1.7 }}>
+              {!preview.rows && !preview.loading && <div className="sf-dim">probe failed · click ↻ to retry</div>}
+              {!preview.rows && preview.loading && <div className="sf-dim">running gates against live Kraken OHLCV…</div>}
+              {preview.rows && preview.rows.length === 0 && <div className="sf-dim">no probes returned</div>}
+              {preview.rows && preview.rows.length > 0 && (() => {
+                const grouped = {};
+                preview.rows.forEach((r) => {
+                  if (!grouped[r.publisher_ens]) grouped[r.publisher_ens] = [];
+                  grouped[r.publisher_ens].push(r);
+                });
+                return (
+                  <div>
+                    {Object.entries(grouped).map(([ens, rows]) => (
+                      <div key={ens} style={{ marginBottom: 8 }}>
+                        <div style={{ color: 'var(--sf-fg-dim)', letterSpacing: '0.05em', marginBottom: 4 }}>{ens}</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 4 }}>
+                          {rows.map((r) => {
+                            const selected = ens === pubEns && r.token === token;
+                            const hue = r.accept ? '74, 222, 128' : '244, 114, 182';
+                            return (
+                              <button
+                                key={r.token}
+                                type="button"
+                                disabled={rite.running}
+                                onClick={() => { setPubEns(ens); setToken(r.token); }}
+                                style={{
+                                  textAlign: 'left',
+                                  padding: '6px 10px',
+                                  background: selected ? `rgba(${hue}, 0.12)` : 'transparent',
+                                  border: `1px solid rgba(${hue}, ${selected ? 0.5 : 0.2})`,
+                                  color: 'var(--sf-fg)',
+                                  fontFamily: 'inherit',
+                                  fontSize: 11,
+                                  cursor: rite.running ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                <span style={{ color: r.accept ? 'var(--sf-signal-win)' : 'var(--sf-signal-loss)' }}>
+                                  {r.accept ? '✓' : '✗'}
+                                </span>
+                                {' '}
+                                <span>{r.token}</span>
+                                {' · '}
+                                <span className="sf-dim">{r.accept ? `PUBLISH ${r.setup}` : r.reason}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {preview.fetchedAt && (
+                      <div className="sf-dim" style={{ marginTop: 8, fontSize: 10 }}>
+                        probed at {new Date(preview.fetchedAt).toLocaleTimeString()} · click any row to load it into the parameters
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="sf-eyebrow" style={{ marginBottom: 12 }}>◊ RITE PARAMETERS</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 12, marginBottom: 16 }}>
+              <label style={{ display: 'block' }}>
+                <div className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.15em', marginBottom: 6 }}>PUBLISHER</div>
+                <select
+                  value={pubEns}
+                  onChange={(e) => setPubEns(e.target.value)}
+                  disabled={rite.running}
+                  className="sf-mono"
+                  style={{ width: '100%', padding: '10px 12px', background: 'var(--sf-bg-ghost)', border: '1px solid var(--sf-border)', color: 'var(--sf-fg)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}
+                >
+                  {coreAgents.map((a) => (
+                    <option key={a.ens} value={a.ens}>{a.label} · {a.ens}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'block' }}>
+                <div className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.15em', marginBottom: 6 }}>TOKEN PAIR</div>
+                <select
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  disabled={rite.running}
+                  className="sf-mono"
+                  style={{ width: '100%', padding: '10px 12px', background: 'var(--sf-bg-ghost)', border: '1px solid var(--sf-border)', color: 'var(--sf-fg)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}
+                >
+                  {supportedTokens.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'block' }}>
+                <div className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.15em', marginBottom: 6 }}>CAPITAL · USDC</div>
+                <input
+                  type="number"
+                  min="0.1"
+                  max="50"
+                  step="0.1"
+                  value={capital}
+                  onChange={(e) => setCapital(Number(e.target.value) || 0)}
+                  disabled={rite.running}
+                  className="sf-mono"
+                  style={{ width: '100%', padding: '10px 12px', background: 'var(--sf-bg-ghost)', border: '1px solid var(--sf-border)', color: 'var(--sf-fg)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}
+                />
+              </label>
+            </div>
+            <div className="sf-mono sf-dim" style={{ fontSize: 10, letterSpacing: '0.05em', marginBottom: 16, lineHeight: 1.6 }}>
+              the trading agent buys this publisher&apos;s signal via x402 · risk-agent verifies · SwapRouter02 executes USDC→WETH on Base Sepolia
             </div>
           </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button
+              className="sf-btn sf-btn-primary"
+              onClick={runRite}
+              disabled={rite.running || stage >= stations.length || !pubEns || capital <= 0}
+              style={(rite.running || stage >= stations.length || !pubEns || capital <= 0) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+            >
+              {rite.running ? '◌ Running rite…' : stage >= stations.length ? '✓ Rite complete' : '⬢ Begin the rite'}
+            </button>
+            <button className="sf-btn sf-btn-ghost" onClick={reset} disabled={rite.running}>↺ Reset</button>
+            <div style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--sf-fg-mute)', alignSelf: 'center' }}>
+              station {Math.min(stage, stations.length)} / {stations.length}
+            </div>
+          </div>
+
+          {rite.error && (
+            <div className="sf-mono" style={{ marginTop: 16, padding: 12, background: 'rgba(244, 114, 182, 0.06)', border: '1px solid rgba(244, 114, 182, 0.25)', fontSize: 11, color: 'var(--sf-signal-loss)' }}>
+              ✕ rite failed · {rite.error}
+            </div>
+          )}
+          {rite.skipped && (
+            <div className="sf-mono" style={{ marginTop: 16, padding: 12, background: 'rgba(155, 109, 255, 0.06)', border: '1px solid rgba(155, 109, 255, 0.25)', fontSize: 11, color: 'var(--sf-fg-dim)', lineHeight: 1.7 }}>
+              ◇ live market: {rite.skipped === 'research_agent_no_signal'
+                ? 'research agent declined to publish this bar — strategy gates not met on real Kraken OHLCV. The pipeline ran honestly; no signal to buy.'
+                : rite.skipped}
+            </div>
+          )}
+          {rite.result?.trade?.tx_hash && (
+            <div className="sf-mono" style={{ marginTop: 16, padding: 12, background: 'rgba(74, 222, 128, 0.05)', border: '1px solid rgba(74, 222, 128, 0.2)', fontSize: 11, color: 'var(--sf-fg-dim)', lineHeight: 1.7 }}>
+              ✓ swap mined ·{' '}
+              <a
+                href={`https://sepolia.basescan.org/tx/${rite.result.trade.tx_hash}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'var(--sf-gold-300)', textDecoration: 'underline' }}
+              >
+                {rite.result.trade.tx_hash.slice(0, 10)}…{rite.result.trade.tx_hash.slice(-6)}
+              </a>
+              {rite.result.trade.amount_out && (
+                <> · received {(Number(rite.result.trade.amount_out) / 1e18).toFixed(6)} WETH</>
+              )}
+              {rite.result.trade.gas_used && (
+                <> · gas {Number(rite.result.trade.gas_used).toLocaleString()}</>
+              )}
+              {typeof rite.result.settle?.settled === 'number' && (
+                <> · validator settled {rite.result.settle.settled} signal{rite.result.settle.settled === 1 ? '' : 's'}</>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
@@ -916,7 +1150,7 @@ function SignalFlow({ onBack, agentId, agents }) {
               </div>
               <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                 <div className="sf-mono sf-dim" style={{ fontSize: 10 }}>PRICE</div>
-                <div className="sf-mono sf-gold" style={{ fontSize: 18 }}>${agent.pricePerSignal.toFixed(2)}</div>
+                <div className="sf-mono sf-gold" style={{ fontSize: 18 }}>{fmtPrice(agent.pricePerSignal)}</div>
               </div>
             </div>
           </div>
@@ -925,21 +1159,20 @@ function SignalFlow({ onBack, agentId, agents }) {
             <div className="sf-eyebrow">⟁ SIGNAL PAYLOAD</div>
             <pre className="sf-mono" style={{ marginTop: 12, fontSize: 10.5, lineHeight: 1.7, color: 'var(--sf-fg-dim)', whiteSpace: 'pre-wrap', maxHeight: stage >= 2 ? 320 : 60, overflow: 'hidden', transition: 'max-height 0.6s cubic-bezier(0.22, 1, 0.36, 1)' }}>
 {stage < 2 ? `{ "status": 402, "x402_required": true,
-  "price": "${agent.pricePerSignal} USDC",
-  "facilitator": "coinbase-cdp"
-}` : `{
-  "signal_id": "${sig.shortId}",
-  "publisher": "${agent.ens}",
-  "token":     "${sig.token}",
-  "direction": "${sig.direction}",
-  "ref_price": ${sig.refPrice},
-  "target":    ${sig.targetPrice},
-  "stop":      ${sig.stopPrice},
-  "horizon_s": ${sig.horizon},
-  "confidence_bps": ${sig.confidence},
-  "block":     ${sig.publishedAtBlock},
-  "signature": "${sig.signature}"
-}`}
+  "price": "${typeof agent.pricePerSignal === 'number' ? agent.pricePerSignal : '?'} USDC",
+  "facilitator": "x402.rs"
+}` : sig.isReal ? `{
+  "signal_id":      "${sig.shortId}",
+  "publisher":      "${agent.ens}",
+  "token":          "${sig.token}",
+  "direction":      "${sig.direction}",
+  "reference_price": ${sig.refPrice},
+  "target_price":   ${sig.targetPrice},
+  "stop_price":     ${sig.stopPrice},
+  "horizon_s":      ${sig.horizon},
+  "confidence_bps": ${sig.confidence}
+}` : `// no live signal from this agent yet
+// publish one from the dashboard, or wait for next strategy tick`}
             </pre>
           </div>
 
@@ -947,11 +1180,13 @@ function SignalFlow({ onBack, agentId, agents }) {
             <div className="sf-eyebrow sf-eyebrow-violet">✦ OUTCOME</div>
             {stage >= 6 ? (
               <div style={{ marginTop: 12 }}>
-                <div className="sf-mono" style={{ fontSize: 11, color: 'var(--sf-signal-win)' }}>VALIDATED · WIN</div>
-                <div className="sf-display" style={{ fontSize: 36, color: 'var(--sf-signal-win)', marginTop: 8 }}>+218 bps</div>
+                <div className="sf-mono" style={{ fontSize: 11, color: 'var(--sf-fg-dim)' }}>SETTLEMENT</div>
+                <div className="sf-display" style={{ fontSize: 24, color: 'var(--sf-fg)', marginTop: 8 }}>
+                  validator reads Uniswap V3 TWAP
+                </div>
                 <div className="sf-mono sf-dim" style={{ fontSize: 10, marginTop: 6, lineHeight: 1.6 }}>
-                  TWAP $3,481.40 · gas $1.84 · slippage 4 bps<br />
-                  reputation +14 · attested to ERC-8004
+                  outcome computed deterministically from on-chain ticks<br />
+                  ReputationRegistry.attest(agent_id, win, pnl_bps, weight)
                 </div>
               </div>
             ) : (
@@ -969,20 +1204,20 @@ function FlowStation({ step, idx, state, isLast, agent, agentCount }) {
   const ring = state === 'active' ? '0 0 0 4px rgba(212, 175, 55, 0.15), 0 0 24px rgba(212, 175, 55, 0.4)' : 'none';
 
   const details = [
-    `scanning IdentityRegistry · ${agentCount || '?'} agents found · sorting by reputation…`,
-    `HTTP 402 · sending ${agent.pricePerSignal} USDC via x402 facilitator…`,
-    'verifying ed25519 signature · stamping 0G Compute attestation…',
-    'checking position $1,200 ≤ max $5,000 · slippage 8 bps ≤ cap 25 bps · vol OK · liquidity OK',
-    'POST /v1/quote → swap LONG WETH 0.347 · /v1/swap with Permit2 sig…',
-    'cron tick · TWAP 3481.40 · pnl +218 bps · ReputationRegistry.attest(0x4e9f, true, 218)',
+    `scanning IdentityRegistry · ${agentCount || '?'} agents found · sorting by reputation`,
+    `HTTP 402 · ${fmtPrice(agent.pricePerSignal)} USDC via x402 facilitator (x402.rs)`,
+    'recovering EIP-191 publisher key · verifying signature matches ENS owner',
+    'risk gates: position size · slippage cap · spot/TWAP deviation · daily limit',
+    'POST /v1/quote → /v1/swap with Permit2 signature · Universal Router',
+    'IUniswapV3Pool.observe(secondsAgos) · path-aware outcome · attest()',
   ];
   const receipts = [
     `↳ matched: ${agent.ens} · rank #${agent.rank} · rep ${agent.reputation}`,
-    `↳ tx 0xa42f…7b09 · ${agent.pricePerSignal} USDC · facilitator OK`,
-    `↳ sig 0x8f4a…2b07 · published block 12,345,678`,
-    '↳ risk attestation 0xc1ed…3a09 · all checks PASS',
-    '↳ tx 0x91ec…44d2 · 0.347 WETH ↔ 1,201.42 USDC · gas 0.0008 ETH',
-    `↳ attested · +218 bps · ${agent.name} reputation +14`,
+    `↳ paid ${fmtPrice(agent.pricePerSignal)} USDC · facilitator returned settle=true`,
+    `↳ signature recovered · publisher = signal.ens_owner · replay nonce ok`,
+    '↳ all risk checks PASS · approved for execution',
+    '↳ swap executed on Base Sepolia · receipt available on Basescan',
+    '↳ outcome attested · ReputationRegistry score updated for agent',
   ];
 
   return (
@@ -1154,9 +1389,9 @@ export default function SibylFiPrototype() {
 
         /* Topbar */
         .sf-topbar {
-          display: flex; align-items: center; gap: 16px;
-          padding: 14px 28px; border-bottom: 1px solid var(--sf-border);
-          background: linear-gradient(180deg, rgba(10, 6, 18, 0.8), rgba(10, 6, 18, 0.4));
+          display: flex; align-items: center; gap: 24px;
+          padding: 16px 32px; border-bottom: 1px solid var(--sf-border);
+          background: linear-gradient(180deg, rgba(10, 6, 18, 0.85), rgba(10, 6, 18, 0.5));
           backdrop-filter: blur(12px);
           position: sticky; top: 0; z-index: 50;
           flex-wrap: wrap;
@@ -1171,104 +1406,83 @@ export default function SibylFiPrototype() {
           font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--sf-fg-mute);
           letter-spacing: 0.2em; text-transform: uppercase;
         }
-        .sf-nav { display: flex; gap: 16px; margin-left: 12px; }
+        .sf-nav { display: flex; gap: 14px; margin-left: 24px; }
         .sf-nav-item {
-          padding: 8px 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
-          letter-spacing: 0.15em; text-transform: uppercase; color: var(--sf-fg-dim);
+          padding: 10px 18px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+          letter-spacing: 0.18em; text-transform: uppercase; color: var(--sf-fg-dim);
           border-radius: 2px; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative;
         }
-        .sf-nav-item:hover { color: var(--sf-gold-300); }
-        .sf-nav-item.is-active { color: var(--sf-gold-300); }
+        .sf-nav-item:hover { color: var(--sf-gold-300); background: rgba(212, 175, 55, 0.04); }
+        .sf-nav-item.is-active { color: var(--sf-gold-300); background: rgba(212, 175, 55, 0.06); }
         .sf-nav-item.is-active::after {
-          content: ""; position: absolute; left: 14px; right: 14px; bottom: 2px; height: 1px;
+          content: ""; position: absolute; left: 18px; right: 18px; bottom: 3px; height: 1px;
           background: linear-gradient(90deg, transparent, var(--sf-gold-500), transparent);
         }
-        .sf-topbar-right { margin-left: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        /* External-route variant (next/link) for the Forge tab */
+        a.sf-nav-item--ext {
+          text-decoration: none; color: var(--sf-violet-300);
+        }
+        a.sf-nav-item--ext::before {
+          content: "+"; margin-right: 6px; color: var(--sf-violet-500);
+        }
+        a.sf-nav-item--ext:hover {
+          color: var(--sf-gold-300); background: rgba(155, 109, 255, 0.06);
+        }
+        .sf-topbar-right { margin-left: auto; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
         .sf-chip {
-          position: relative;
           display: inline-flex; align-items: center; gap: 8px;
-          padding: 8px 16px; border: 1px solid var(--sf-border); border-radius: 2px;
+          padding: 6px 12px; border: 1px solid var(--sf-border); border-radius: 2px;
           font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.15em;
           text-transform: uppercase; color: var(--sf-fg-dim);
         }
-        .sf-chip::before, .sf-chip::after {
-          content: ""; position: absolute; width: 5px; height: 5px;
-          border: 1px solid var(--sf-gold-500); pointer-events: none;
-        }
-        .sf-chip::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-        .sf-chip::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
         .sf-chip-dot {
           width: 6px; height: 6px; border-radius: 50%;
           background: var(--sf-signal-win); box-shadow: 0 0 8px var(--sf-signal-win);
           animation: sf-pulse 2s infinite;
         }
         @keyframes sf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .sf-forge {
-          position: relative;
-          display: inline-flex; align-items: center; gap: 6px;
-          margin-left: 4px;
-          padding: 8px 14px; border-radius: 2px;
-          border: 1px solid var(--sf-border-violet);
-          background: linear-gradient(180deg, rgba(124, 58, 237, 0.10), rgba(124, 58, 237, 0.02));
-          font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.2em;
-          text-transform: uppercase; color: var(--sf-violet-300);
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .sf-forge::before, .sf-forge::after {
-          content: ""; position: absolute; width: 5px; height: 5px;
-          border: 1px solid var(--sf-violet-500); pointer-events: none;
-        }
-        .sf-forge::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-        .sf-forge::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
-        .sf-forge:hover {
-          border-color: var(--sf-violet-500);
-          background: rgba(124, 58, 237, 0.18);
-          color: var(--sf-violet-300);
-          box-shadow: 0 0 24px rgba(124, 58, 237, 0.25);
-        }
-        .sf-forge-plus { color: var(--sf-violet-500); font-weight: 500; }
         .sf-wallet {
-          position: relative;
           display: inline-flex; align-items: center; gap: 10px;
-          padding: 10px 18px; border: 1px solid var(--sf-gold-500); border-radius: 2px;
-          background: linear-gradient(180deg, rgba(212, 175, 55, 0.18), rgba(212, 175, 55, 0.06));
-          font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
-          letter-spacing: 0.18em; text-transform: uppercase; color: var(--sf-gold-100);
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .sf-wallet::before, .sf-wallet::after {
-          content: ""; position: absolute; width: 6px; height: 6px;
-          border: 1px solid var(--sf-gold-500); pointer-events: none;
-        }
-        .sf-wallet::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-        .sf-wallet::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
-        .sf-wallet:hover {
-          background: linear-gradient(180deg, rgba(212, 175, 55, 0.28), rgba(212, 175, 55, 0.1));
-          color: var(--sf-gold-100);
-          box-shadow: 0 0 24px rgba(212, 175, 55, 0.25);
-        }
-        .sf-wallet-dot {
-          display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-          background: var(--sf-gold-500); box-shadow: 0 0 8px rgba(212, 175, 55, 0.5);
-        }
-        .sf-wallet-chev {
-          color: var(--sf-gold-300); font-size: 14px; line-height: 1;
-          margin-left: 2px; transition: transform 0.2s;
-        }
-        .sf-wallet:hover .sf-wallet-chev { transform: translateX(2px); }
-        .sf-wallet.is-connected {
-          padding: 8px 14px;
-          background: linear-gradient(180deg, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02));
-          border-color: var(--sf-border-strong);
+          padding: 10px 16px;
+          border: 1px solid var(--sf-border-strong);
+          border-radius: 2px;
+          background: linear-gradient(180deg, rgba(212, 175, 55, 0.10), rgba(212, 175, 55, 0.02));
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px; font-weight: 500;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
           color: var(--sf-gold-300);
-          font-weight: 400; letter-spacing: 0.04em; text-transform: none;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
         }
-        .sf-wallet.is-connected:hover {
-          background: rgba(212, 175, 55, 0.12);
+        .sf-wallet::before {
+          /* gold corner glints, mirroring the .sf-card bracket motif */
+          content: ""; position: absolute; top: -1px; left: -1px;
+          width: 6px; height: 6px;
+          border-top: 1px solid var(--sf-gold-500);
+          border-left: 1px solid var(--sf-gold-500);
+          pointer-events: none;
+        }
+        .sf-wallet::after {
+          content: ""; position: absolute; bottom: -1px; right: -1px;
+          width: 6px; height: 6px;
+          border-bottom: 1px solid var(--sf-gold-500);
+          border-right: 1px solid var(--sf-gold-500);
+          pointer-events: none;
+        }
+        .sf-wallet:hover {
           border-color: var(--sf-gold-500);
-          box-shadow: 0 0 16px rgba(212, 175, 55, 0.18);
+          background: rgba(212, 175, 55, 0.16);
+          color: var(--sf-gold-100);
+          box-shadow: 0 0 24px rgba(212, 175, 55, 0.18);
         }
-        .sf-wallet.is-connected .sf-wallet-dot {
+        .sf-wallet svg { stroke: currentColor; flex-shrink: 0; }
+        .sf-wallet .sf-wallet-status {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: var(--sf-fg-mute);
+          box-shadow: 0 0 6px rgba(120, 106, 82, 0.4);
+        }
+        .sf-wallet[data-state="connected"] .sf-wallet-status {
           background: var(--sf-signal-win);
           box-shadow: 0 0 8px var(--sf-signal-win);
           animation: sf-pulse 2s infinite;
@@ -1403,6 +1617,53 @@ export default function SibylFiPrototype() {
         .sf-flash-up { color: var(--sf-signal-win); transform: translateY(-2px); }
         .sf-flash-down { color: var(--sf-signal-loss); transform: translateY(2px); }
 
+        /* "Become a sibyl" CTA on the leaderboard hero */
+        .sf-cta-forge {
+          display: inline-flex; align-items: center; gap: 14px;
+          margin-top: 20px;
+          padding: 14px 18px;
+          border: 1px solid var(--sf-border-violet);
+          border-radius: 2px;
+          background: linear-gradient(180deg, rgba(124, 58, 237, 0.08), rgba(124, 58, 237, 0.02));
+          color: var(--sf-fg);
+          text-decoration: none;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+        }
+        .sf-cta-forge::before, .sf-cta-forge::after {
+          content: ""; position: absolute; width: 6px; height: 6px;
+          border: 1px solid var(--sf-violet-500); pointer-events: none;
+        }
+        .sf-cta-forge::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+        .sf-cta-forge::after  { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+        .sf-cta-forge:hover {
+          background: rgba(124, 58, 237, 0.14);
+          border-color: var(--sf-violet-500);
+          box-shadow: 0 0 24px rgba(124, 58, 237, 0.2);
+        }
+        .sf-cta-forge__glyph {
+          font-family: 'JetBrains Mono', monospace; font-size: 22px;
+          color: var(--sf-violet-300); width: 28px; text-align: center;
+        }
+        .sf-cta-forge__title {
+          display: block;
+          font-family: 'Cinzel', serif;
+          font-size: 14px; letter-spacing: 0.06em;
+          color: var(--sf-violet-300); text-transform: uppercase;
+        }
+        .sf-cta-forge__sub {
+          display: block;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px; color: var(--sf-fg-dim); margin-top: 2px;
+          letter-spacing: 0.04em;
+        }
+        .sf-cta-forge__arrow {
+          margin-left: 8px;
+          color: var(--sf-violet-300); font-size: 16px;
+          transition: transform 0.2s;
+        }
+        .sf-cta-forge:hover .sf-cta-forge__arrow { transform: translateX(4px); }
+
         /* Leaderboard row reorder pulse */
         .sf-lb-row:hover { background: rgba(212, 175, 55, 0.04) !important; }
         .sf-lb-row-up { background: linear-gradient(90deg, rgba(74, 222, 128, 0.06), transparent); }
@@ -1428,7 +1689,7 @@ export default function SibylFiPrototype() {
           <main className="sf-main">
             {view === 'leaderboard' && <Leaderboard agents={agents} onAgentSelect={goProfile} />}
             {view === 'profile' && <AgentProfile agentId={selectedAgent} agents={agents} signals={signals} onBack={goBack} onBuy={goFlow} />}
-            {view === 'flow' && <SignalFlow onBack={goBack} agentId={selectedAgent} agents={agents} />}
+            {view === 'flow' && <SignalFlow onBack={goBack} agentId={selectedAgent} agents={agents} signals={signals} />}
             {view === 'feed' && <SignalFeed agents={agents} signals={signals} onAgentSelect={goProfile} onBuy={goFlow} />}
           </main>
         </div>
