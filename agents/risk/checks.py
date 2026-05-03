@@ -69,6 +69,7 @@ def _effective_thresholds(profile_floor: dict, appetite_uplift: dict) -> dict:
         "max_slippage_bps": p["max_slippage_bps"] + a["max_slippage_bps_uplift_below_floor"],
         "min_pool_tvl_usd": p["min_pool_tvl_usd"] + a["min_pool_tvl_uplift_usd"],
         "max_stop_pct": p["max_stop_pct"],
+        "min_stop_pct": p["min_stop_pct"],
         "max_spot_twap_dev": p["max_spot_twap_dev"],
         "min_confidence_bps": a["min_confidence_bps"],
         "max_horizon_seconds": p["max_horizon_seconds"],
@@ -125,8 +126,11 @@ class RiskChecker:
         if signal.direction != "long":
             failed.append(RiskCheck.NON_LONG_REJECTED)
 
-        # 2. POSITION_SIZE
-        if position_size_usd > capital_usd * thresholds["max_position_pct_capital"]:
+        # 2. POSITION_SIZE — position is already capped at glob["max_position_size_usd_cap"]
+        # via the Elder calc above. The earlier "% of capital" check double-counted:
+        # Elder's 1% risk + a 0.5% stop naturally yields position ≈ 200% of capital, which
+        # is correct (the dollar-risk bound is what matters, not notional-vs-capital).
+        if position_size_usd > glob["max_position_size_usd_cap"]:
             failed.append(RiskCheck.POSITION_SIZE)
 
         # 3. RR_INSUFFICIENT
@@ -153,10 +157,12 @@ class RiskChecker:
         if spot_twap_dev > thresholds["max_spot_twap_dev"]:
             failed.append(RiskCheck.TWAP_DEVIATION)
 
-        # 9. STOP_TOO_CLOSE
+        # 9. STOP_TOO_CLOSE — profile-aware. Scalpers operate on tight stops by design;
+        # rejecting them at the global swing-tuned 0.3% floor would never let a scalper
+        # signal through. Each profile carries its own minimum-stop floor.
         if pool.spot_price > 0:
             distance_to_stop = abs(pool.spot_price - signal.stop_price) / pool.spot_price
-            if distance_to_stop < glob["stop_too_close_pct"]:
+            if distance_to_stop < thresholds["min_stop_pct"]:
                 failed.append(RiskCheck.STOP_TOO_CLOSE)
 
         # 10. SELF_PURCHASE

@@ -1,10 +1,12 @@
 {
   "_note": "Profile-keyed risk thresholds. v2 long-only. Source: agent-risk.md §3-4. Profile is auto-detected from signal.horizon_seconds: <=7200s scalper, >=86400s swing, else intraday.",
   "_position_size_note": "max_position_pct_capital is 1.0 (full capital deployable) because Elder's 1% risk-per-trade with 1% stops forces position size ≈ capital — capping at 2% was mathematically impossible. The absolute $500 USD cap (global.max_position_size_usd_cap) is what actually bounds notional risk.",
+  "_min_stop_note": "min_stop_pct floors stops at noise level for each profile. Scalpers run tighter (50bps) than swing (30bps) by design — using one global floor would either reject every scalper or let unsafe swings through.",
   "swing": {
     "min_rr": 2.5,
     "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.010,
+    "min_stop_pct": 0.0030,
     "max_slippage_bps": 150,
     "min_pool_tvl_usd": 100000,
     "max_spot_twap_dev": 0.030,
@@ -16,6 +18,7 @@
     "min_rr": 2.0,
     "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.010,
+    "min_stop_pct": 0.0005,
     "max_slippage_bps": 80,
     "min_pool_tvl_usd": 100000,
     "max_spot_twap_dev": 0.015,
@@ -27,6 +30,7 @@
     "min_rr": 2.0,
     "max_position_pct_capital": 1.0,
     "max_stop_pct": 0.015,
+    "min_stop_pct": 0.0020,
     "max_slippage_bps": 120,
     "min_pool_tvl_usd": 100000,
     "max_spot_twap_dev": 0.020,
@@ -37,7 +41,6 @@
   "global": {
     "max_position_size_usd_cap": 500,
     "elder_max_30d_loss_pct": 0.06,
-    "stop_too_close_pct": 0.003,
     "exhaustion_cost_max_position_ratio": 0.10,
     "elder_risk_pct_per_trade": 0.01
   }
