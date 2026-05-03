@@ -23,7 +23,12 @@ from agents.shared.settings import get_settings
 from agents.shared.signal_schema import RiskAttestation, Signal
 from agents.shared.signing import verify_signal
 from agents.shared.x402_client import fetch_paywalled
-from agents.trading.uniswap import Quote, SwapResult, UniswapTradingAPI
+from agents.trading.uniswap import (
+    MainnetReferenceQuote,
+    Quote,
+    SwapResult,
+    UniswapTradingAPI,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -34,6 +39,7 @@ class TradeResult:
     risk: RiskAttestation | None
     quote: Quote | None
     swap: SwapResult | None
+    mainnet_reference: MainnetReferenceQuote | None = None
     skipped_reason: str | None = None
 
 
@@ -49,20 +55,37 @@ class TradingAgent:
         self,
         token: str = "WETH/USDC",
         capital_usd: float = 1000.0,
+        publisher_ens: str | None = None,
     ) -> TradeResult:
-        """The full pipeline."""
+        """The full pipeline.
+
+        publisher_ens: when set, force the trade through this specific
+        Research Agent instead of auto-ranking by reputation. Lets the UI
+        let users pick swing vs scalper rather than always defaulting to
+        whichever has higher score.
+        """
 
         # 1. Discover Research Agents
         agents = self.erc8004.list_agents()
-        ranked = sorted(
-            agents,
-            key=lambda a: self.erc8004.get_reputation_score(a.agent_id),
-            reverse=True,
-        )
-        if not ranked:
-            raise RuntimeError("no Research Agents registered")
-
-        chosen = ranked[0]
+        if publisher_ens:
+            chosen = next(
+                (a for a in agents if a.ens_name.lower() == publisher_ens.lower()),
+                None,
+            )
+            if chosen is None:
+                raise RuntimeError(
+                    f"publisher_ens={publisher_ens!r} not found among "
+                    f"{[a.ens_name for a in agents]}"
+                )
+        else:
+            ranked = sorted(
+                agents,
+                key=lambda a: self.erc8004.get_reputation_score(a.agent_id),
+                reverse=True,
+            )
+            if not ranked:
+                raise RuntimeError("no Research Agents registered")
+            chosen = ranked[0]
         log.info("trading_chose_publisher", ens=chosen.ens_name, agent_id=chosen.agent_id)
 
         # 2. Pay for and fetch the signal
@@ -89,20 +112,26 @@ class TradingAgent:
             return TradeResult(signal=signal, risk=risk, quote=None, swap=None,
                               skipped_reason=f"risk_failed: {[c.value for c in risk.failed_checks]}")
 
-        # 5. Execute on Uniswap
+        # 5. Execute on Uniswap (Base Sepolia, V3 SwapRouter02 direct).
+        amount_in_usdc_micro = str(int(capital_usd * 1_000_000))   # USDC has 6 decimals
         quote = await self.uniswap.quote(
             token_in=self.settings.USDC_BASE_SEPOLIA,
             token_out=self.settings.WETH_BASE_SEPOLIA,
-            amount_in=str(int(capital_usd * 1_000_000)),  # USDC has 6 decimals
+            amount_in=amount_in_usdc_micro,
             swapper=self.address,
         )
-        # In real mode, sign permit_data via EIP-712. In mock, signature is unused.
-        swap = await self.uniswap.swap(quote=quote, signature="0xMOCKSIG" if self.settings.MOCK_MODE else "")
+        # Pull a mainnet reference quote in parallel — demo-only price oracle,
+        # never gates execution. Logged regardless of testnet outcome.
+        ref = await self.uniswap.mainnet_reference_quote(
+            amount_in_usdc_micro=amount_in_usdc_micro,
+            swapper=self.address,
+        )
+        swap = await self.uniswap.swap(quote=quote)
 
         # 6. Record execution
         await self._record_execution(signal, capital_usd, quote, swap)
 
-        return TradeResult(signal=signal, risk=risk, quote=quote, swap=swap)
+        return TradeResult(signal=signal, risk=risk, quote=quote, swap=swap, mainnet_reference=ref)
 
     # ─────────────────────────────────────────────────────────────────
 
@@ -146,9 +175,11 @@ class TradingAgent:
         quote: Quote,
         swap: SwapResult,
     ) -> None:
-        # Compute actual fill price from amounts
+        # Use the on-chain fill amount from the receipt when present, otherwise
+        # fall back to the quoted amount. Both are smallest-unit ints.
         amount_in_usdc = int(quote.amount_in) / 1_000_000
-        amount_out_token = int(quote.amount_out) / 1e18  # assume 18-decimal output for prototype
+        amount_out_raw = int(swap.amount_out) if swap.amount_out else int(quote.amount_out)
+        amount_out_token = amount_out_raw / 1e18  # WETH is 18-decimal
         actual_fill = amount_in_usdc / amount_out_token if amount_out_token > 0 else 0.0
 
         async with db_conn() as conn:

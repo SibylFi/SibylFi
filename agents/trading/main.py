@@ -28,12 +28,21 @@ async def root():
 
 
 @app.post("/trade")
-async def trade(token: str = "WETH/USDC", capital_usd: float = 1000.0):
+async def trade(
+    token: str = "WETH/USDC",
+    capital_usd: float = 1000.0,
+    publisher_ens: str | None = None,
+):
     """
     Run the discover → buy → risk → execute pipeline once.
     Returns the trade result for inspection.
+
+    publisher_ens (optional): force a specific Research Agent (e.g.
+    "swing.sibylfi.eth"). Defaults to highest-reputation discovery.
     """
-    result = await _agent.discover_and_trade(token=token, capital_usd=capital_usd)
+    result = await _agent.discover_and_trade(
+        token=token, capital_usd=capital_usd, publisher_ens=publisher_ens,
+    )
     return {
         "signal_id": result.signal.signal_id if result.signal else None,
         "publisher": result.signal.publisher if result.signal else None,
@@ -42,4 +51,17 @@ async def trade(token: str = "WETH/USDC", capital_usd: float = 1000.0):
         "skipped_reason": result.skipped_reason,
         "tx_hash": result.swap.tx_hash if result.swap else None,
         "gas_used": result.swap.gas_used if result.swap else None,
+        "fill_price": result.swap.actual_fill_price if result.swap else None,
+        "amount_out": result.swap.amount_out if result.swap else None,
+        # Trading API mainnet reference (demo-only): None when MOCK_MODE or
+        # when the API doesn't respond. Surfaces the Trading API track in the
+        # demo even though execution lives on Base Sepolia.
+        "mainnet_reference": (
+            {
+                "route": result.mainnet_reference.route,
+                "amount_out": result.mainnet_reference.amount_out,
+                "block": result.mainnet_reference.block_number,
+            }
+            if result.mainnet_reference else None
+        ),
     }
