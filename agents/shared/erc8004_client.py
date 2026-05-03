@@ -53,7 +53,12 @@ class ERC8004Client:
     def __init__(self, signer_priv_key: Optional[str] = None):
         self.settings = get_settings()
         self._abis = json.loads(ABI_PATH.read_text())
-        self._addresses = json.loads(ADDRESSES_PATH.read_text())["sepolia"]
+        _deployed = json.loads(ADDRESSES_PATH.read_text())
+        # Schema tolerates either flat {"sepolia": {...}} or nested
+        # {"networks": {"sepolia": {...}}}. The repo standardised on nested
+        # after multi-chain support landed; the flat fallback covers older
+        # snapshots and the test fixtures.
+        self._addresses = _deployed.get("networks", _deployed)["sepolia"]
         self._signer_priv_key = signer_priv_key
         self._mock = self.settings.MOCK_MODE
 
@@ -62,14 +67,12 @@ class ERC8004Client:
 
         if not self._mock:
             self._w3 = Web3(Web3.HTTPProvider(self.settings.SEPOLIA_RPC))
-            self._identity = self._w3.eth.contract(
-                address=self._addresses["ERC8004_IdentityRegistry"],
-                abi=self._abis["IdentityRegistry"],
-            )
-            self._reputation = self._w3.eth.contract(
-                address=self._addresses["ERC8004_ReputationRegistry"],
-                abi=self._abis["ReputationRegistry"],
-            )
+            # Tolerate both legacy `ERC8004_IdentityRegistry` keys and the
+            # current short `IdentityRegistry` keys in deployed-addresses.json.
+            id_addr  = self._addresses.get("IdentityRegistry")  or self._addresses.get("ERC8004_IdentityRegistry")
+            rep_addr = self._addresses.get("ReputationRegistry") or self._addresses.get("ERC8004_ReputationRegistry")
+            self._identity = self._w3.eth.contract(address=id_addr,  abi=self._abis["IdentityRegistry"])
+            self._reputation = self._w3.eth.contract(address=rep_addr, abi=self._abis["ReputationRegistry"])
 
     # ─────────────────────────────────────────────────────────────────
     # Identity
