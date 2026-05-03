@@ -25,7 +25,7 @@ from agents.shared.signal_schema import (
 def _signal_kwargs(**overrides):
     base = dict(
         signal_id="0x" + "ab" * 32,
-        publisher="swing.sibyl.eth",
+        publisher="swing.sibylfi.eth",
         token="eip155:84532/erc20:0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
         direction="long",
         entry_condition=EntryCondition(reference_price=3500.0),
@@ -122,7 +122,7 @@ def test_risk_attestation_profile_required():
         pool_tvl_usd=500_000.0,
         spot_twap_deviation=0.004,
         multi_tp=True,
-        risk_attester="risk.sibyl.eth",
+        risk_attester="risk.sibylfi.eth",
         signature="0x" + "cd" * 65,
     )
     assert att.profile == "swing"
@@ -143,6 +143,6 @@ def test_risk_attestation_invalid_profile_rejected():
             expected_slippage_bps=15,
             pool_tvl_usd=500_000.0,
             spot_twap_deviation=0.004,
-            risk_attester="risk.sibyl.eth",
+            risk_attester="risk.sibylfi.eth",
             signature="0x" + "cd" * 65,
         )

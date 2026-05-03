@@ -17,7 +17,7 @@ settings = get_settings()
 PERSONA = PersonaConfig(
     name="scalper",
     profile="scalper",
-    ens_name="scalper.sibyl.eth",
+    ens_name="scalper.sibylfi.eth",
     private_key=settings.RESEARCH_MOMENTUM_KEY,   # reuse existing funded wallet
     price_per_signal_usdc=0.50,
     scalper_params=ScalperParams(mode="Balanced"),

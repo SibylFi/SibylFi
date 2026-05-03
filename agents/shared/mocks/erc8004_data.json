@@ -5,7 +5,7 @@
       "agent_id": 1,
       "owner": "0x87A63b684De1BA4d3Be9A61fB0E5c8Db0C4AA70b",
       "endpoint": "http://research-swing:7101/signal",
-      "ens_name": "swing.sibyl.eth",
+      "ens_name": "swing.sibylfi.eth",
       "profile": "swing",
       "registered_at": 1716000000
     },
@@ -13,7 +13,7 @@
       "agent_id": 2,
       "owner": "0xcE56680E2cf0D7415c388Ce90ce61d5Ccec39eeF",
       "endpoint": "http://research-scalper:7102/signal",
-      "ens_name": "scalper.sibyl.eth",
+      "ens_name": "scalper.sibylfi.eth",
       "profile": "scalper",
       "registered_at": 1716100000
     }

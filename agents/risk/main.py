@@ -21,7 +21,7 @@ from agents.shared.db import close_pool, init_pool
 from agents.shared.logging_setup import setup_logging
 from agents.shared.settings import get_settings
 from agents.shared.signal_schema import RiskAttestation, Signal
-from agents.shared.x402_middleware import PriceConfig, require_payment
+from agents.shared.x402_middleware import PriceConfig, install_x402_handlers, require_payment
 
 log = structlog.get_logger(__name__)
 
@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SibylFi Risk Agent", version="0.1.0", lifespan=lifespan)
+install_x402_handlers(app)
 _settings = get_settings()
 _addr = Account.from_key(_settings.RISK_KEY).address
 _checker = RiskChecker(priv_key=_settings.RISK_KEY)
@@ -54,13 +55,13 @@ _price = PriceConfig(usdc=PRICE_USDC, recipient_addr=_addr)
 
 @app.get("/")
 async def root():
-    return {"ens": "risk.sibyl.eth", "address": _addr, "price_per_check_usdc": PRICE_USDC}
+    return {"ens": "risk.sibylfi.eth", "address": _addr, "price_per_check_usdc": PRICE_USDC}
 
 
 @app.get("/.well-known/agent-card.json")
 async def agent_card():
     return {
-        "name": "risk.sibyl.eth",
+        "name": "risk.sibylfi.eth",
         "description": "SibylFi Risk Agent — deterministic verification of signals before execution",
         "version": "0.1.0",
         "endpoint": "/verify",

@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 Direction = Literal["long"]  # v2: long-only — short is rejected at schema, risk, and validator layers
 Hex32 = Annotated[str, Field(pattern=r"^0x[0-9a-fA-F]{64}$")]
 HexSig = Annotated[str, Field(pattern=r"^0x[0-9a-fA-F]+$")]
-EnsName = Annotated[str, Field(pattern=r"^[a-z0-9-]+\.sibyl\.eth$")]
+EnsName = Annotated[str, Field(pattern=r"^[a-z0-9-]+\.sibylfi\.eth$")]
 
 
 # ─────────────────────────────────────────────────────────────────────────

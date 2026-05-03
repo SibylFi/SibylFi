@@ -35,7 +35,7 @@ def _persona(profile: str) -> PersonaConfig:
     return PersonaConfig(
         name=profile,
         profile=profile,
-        ens_name=f"{profile}.sibyl.eth",
+        ens_name=f"{profile}.sibylfi.eth",
         private_key=_DUMMY_KEY,
         price_per_signal_usdc=0.5,
         prompt_template="t={token} p={profile} s={setup} c={confidence_base}/{confidence_cap} "
@@ -146,7 +146,7 @@ def test_generate_signal_swing_happy_path(monkeypatch):
     )
     assert isinstance(sig, Signal)
     assert sig.direction == "long"
-    assert sig.publisher == "swing.sibyl.eth"
+    assert sig.publisher == "swing.sibylfi.eth"
     assert sig.entry_condition.reference_price == 3450.0
 
     # base 8000 from strategy + LLM delta in [-300, +300] → final ∈ [7700, 8300]
@@ -217,7 +217,7 @@ def test_generate_signal_scalper_happy_path(monkeypatch):
     )
     assert sig is not None
     assert sig.direction == "long"
-    assert sig.publisher == "scalper.sibyl.eth"
+    assert sig.publisher == "scalper.sibylfi.eth"
     assert sig.metadata["profile"] == "scalper"
     assert sig.metadata["setup"] == "Pullback"
     assert sig.metadata["rr_structure"] == "2:1 single TP"
