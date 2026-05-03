@@ -146,15 +146,19 @@ async def _settle_one(signal: Signal) -> None:
         n_checkpoints=5,
     )
 
-    # 4. Run the algorithm
+    # 4. Run the algorithm — pull live chain values from Base Sepolia (gas
+    # price, head block) and the closing TWAP checkpoint as the ETH/USD
+    # reference. In MOCK_MODE _read_chain_context returns deterministic stubs
+    # so unit tests stay reproducible.
+    eth_usd, gas_price_wei, head_block = _read_chain_context(checkpoints)
     settlement = settle(SettlementInputs(
         signal=signal,
         publisher_addr=publisher_addr,
         checkpoints=checkpoints,
         executions=executions,
-        eth_usd_at_horizon=3450.0,  # mock; real mode reads ETH/USD oracle
-        base_sepolia_gas_price_wei=1_000_000_000,  # 1 gwei mock
-        settled_at_block=12_345_900,
+        eth_usd_at_horizon=eth_usd,
+        base_sepolia_gas_price_wei=gas_price_wei,
+        settled_at_block=head_block,
         settled_at_timestamp=int(datetime.now(timezone.utc).timestamp()),
     ))
 
@@ -186,6 +190,56 @@ async def _settle_one(signal: Signal) -> None:
         weight=weight,
         tx_hash=tx_hash,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Chain context helpers
+# ─────────────────────────────────────────────────────────────────────────
+
+_w3_base_sepolia = None
+
+
+def _get_base_sepolia_w3():
+    """Lazy-init a Base Sepolia web3 client for reading gas price + head block."""
+    global _w3_base_sepolia
+    if _w3_base_sepolia is None:
+        from web3 import Web3
+        _w3_base_sepolia = Web3(Web3.HTTPProvider(get_settings().BASE_SEPOLIA_RPC))
+    return _w3_base_sepolia
+
+
+def _read_chain_context(checkpoints) -> tuple[float, int, int]:
+    """
+    Returns (eth_usd_at_horizon, gas_price_wei, head_block_number).
+
+    eth_usd_at_horizon comes from the closing TWAP checkpoint — that's the
+    same on-chain pool we already read for path PnL, so the price is
+    consistent with the settlement input.
+    gas_price_wei + head_block come from the live Base Sepolia node.
+
+    In MOCK_MODE we use stable stubs so unit tests stay deterministic.
+    """
+    settings = get_settings()
+    if settings.MOCK_MODE or not checkpoints:
+        return 3450.0, 1_000_000_000, 12_345_900
+
+    # Closing checkpoint = last entry; .price is the WETH→USDC decimal-adjusted
+    # spot from the same on-chain TWAP we use for path PnL, so the figure is
+    # internally consistent with the rest of the settlement input.
+    closing = checkpoints[-1]
+    eth_usd = float(getattr(closing, "price", 0)) or 3450.0
+
+    try:
+        w3 = _get_base_sepolia_w3()
+        gas_price_wei = int(w3.eth.gas_price)
+        head_block = int(w3.eth.block_number)
+    except Exception as e:
+        log.warning("validator_chain_context_read_failed", error=str(e))
+        # Fall back to mock for these two numerical inputs only — the
+        # algorithm needs *some* value, and we'd rather settle than block.
+        gas_price_wei, head_block = 1_000_000_000, 12_345_900
+
+    return eth_usd, gas_price_wei, head_block
 
 
 # ─────────────────────────────────────────────────────────────────────────

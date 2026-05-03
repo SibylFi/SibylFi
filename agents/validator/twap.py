@@ -1,16 +1,19 @@
 """
 TWAP reader for the SibylFi Validator.
 
-MOCK_MODE=1: deterministic seeded random walk from fixture ref_price to
-             exit_price — reproducible demo, no network calls.
+Source ladder (real mode):
+  1. Uniswap V3 `pool.observe()` on Base Sepolia — the *correct* settlement
+     source. Same pool the trader executed against, on-chain, replayable by
+     anyone reading the chain. This is the property that makes ERC-8004
+     reputation meaningful: deterministic settlement.
+  2. Kraken public OHLC — labelled `degraded_mode=true` fallback when the
+     pool doesn't exist on testnet, or has insufficient observation
+     cardinality for the horizon. Off-chain and not replayable; only
+     defensible for a demo when the on-chain path is unavailable.
+  3. Mock fixtures — last resort when both networks are down.
 
-MOCK_MODE=0: fetches recent price history from Binance public klines API and
-             samples n_checkpoints evenly across the horizon window.  The
-             "validation window" is the last horizon_seconds of real price
-             history (i.e. the signal is treated as having been published
-             horizon_seconds ago and settling now).  This gives real WIN/LOSS
-             outcomes based on actual market movement.  Falls back to mock on
-             any network failure and logs degraded mode.
+MOCK_MODE=1: skips the ladder; deterministic seeded random walk from fixture
+ref_price to exit_price for reproducible local tests.
 """
 from __future__ import annotations
 
@@ -48,11 +51,25 @@ def read_checkpoints(
     if settings.MOCK_MODE:
         return _mock_checkpoints(token, published_at_block, horizon_seconds, n_checkpoints)
 
+    # Tier 1 — Uniswap V3 observe() (on-chain, deterministic, replayable).
+    try:
+        from agents.validator.uniswap_twap import read_uniswap_v3_checkpoints
+        return read_uniswap_v3_checkpoints(token, horizon_seconds, n_checkpoints)
+    except Exception as exc:
+        log.warning(
+            "twap_uniswap_v3_failed_falling_back_to_kraken",
+            token=token,
+            horizon_seconds=horizon_seconds,
+            degraded_mode=True,
+            reason=str(exc),
+        )
+
+    # Tier 2 — Kraken OHLC (off-chain market data, NOT replayable).
     try:
         return _real_checkpoints(token, horizon_seconds, n_checkpoints)
     except Exception as exc:
         log.warning(
-            "twap_real_failed_falling_back_to_mock",
+            "twap_kraken_failed_falling_back_to_mock",
             token=token,
             horizon_seconds=horizon_seconds,
             error=str(exc),
