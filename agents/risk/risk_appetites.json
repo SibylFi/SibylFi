@@ -1,0 +1,24 @@
+{
+  "_note": "Risk appetite layer. Orthogonal to profile (swing/scalper/intraday). 'balanced' must be the no-op identity. 'conservative' tightens; 'aggressive' loosens reasonable axes. Combination rules per field — see _effective_thresholds in checks.py.",
+  "conservative": {
+    "min_rr_uplift_above_floor": 0.5,
+    "max_position_pct_capital_uplift": -0.005,
+    "max_slippage_bps_uplift_below_floor": -20,
+    "min_pool_tvl_uplift_usd": 50000,
+    "min_confidence_bps": 8500
+  },
+  "balanced": {
+    "min_rr_uplift_above_floor": 0,
+    "max_position_pct_capital_uplift": 0,
+    "max_slippage_bps_uplift_below_floor": 0,
+    "min_pool_tvl_uplift_usd": 0,
+    "min_confidence_bps": 7000
+  },
+  "aggressive": {
+    "min_rr_uplift_above_floor": -0.3,
+    "max_position_pct_capital_uplift": 0.005,
+    "max_slippage_bps_uplift_below_floor": 30,
+    "min_pool_tvl_uplift_usd": -25000,
+    "min_confidence_bps": 5500
+  }
+}
