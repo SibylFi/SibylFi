@@ -22,6 +22,7 @@ from agents.shared.db import close_pool, db_conn, init_pool
 from agents.shared.erc8004_client import ERC8004Client
 from agents.shared.logging_setup import setup_logging
 from agents.shared.settings import get_settings
+from orchestrator.custom_agents import router as custom_agents_router
 
 log = structlog.get_logger(__name__)
 
@@ -34,13 +35,14 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="SibylFi Orchestrator", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SibylFi Orchestrator", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten in prod
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(custom_agents_router)
 
 _settings = get_settings()
 _erc8004 = ERC8004Client()
@@ -217,16 +219,21 @@ async def agent_detail(ens_name: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────
 
 @app.post("/demo/publish-signal")
-async def demo_publish_signal(persona: str = "meanrev", token: str = "WETH/USDC") -> dict:
-    """Trigger a Research Agent to publish a signal. Used by the demo control panel."""
-    port_map = {"meanrev": 7101, "momentum": 7102, "news": 7103}
-    port = port_map.get(persona, 7101)
-    url = f"http://research-{persona}:{port}/signal?token={token}"
+async def demo_publish_signal(persona: str = "swing", token: str = "WETH/USDC") -> dict:
+    """Trigger a Research Agent to publish a signal. Used by the demo control panel.
 
-    # Note: in real mode this requires x402 payment; demo mode bypasses by using mock_mode
+    v2 personas: 'swing' (4H/1D, port 7101) and 'scalper' (1m/5m, port 7102).
+    Strategy may decline this bar — that returns 204 with no body.
+    """
+    port_map = {"swing": 7101, "scalper": 7102}
+    if persona not in port_map:
+        raise HTTPException(status_code=400, detail=f"unknown persona: {persona}; expected swing|scalper")
+    url = f"http://research-{persona}:{port_map[persona]}/signal?token={token}"
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # Send fake payment header — middleware accepts any in MOCK_MODE
         r = await client.get(url, headers={"X-PAYMENT": "demo-mock-token"})
+        if r.status_code == 204:
+            return {"status": "no_signal", "reason": "strategy_declined", "persona": persona}
         if r.status_code != 200:
             raise HTTPException(status_code=502, detail=f"agent returned {r.status_code}: {r.text}")
         return r.json()
@@ -248,6 +255,101 @@ async def demo_trade_now(token: str = "WETH/USDC", capital_usd: float = 1000.0) 
             f"http://trading-agent:7104/trade?token={token}&capital_usd={capital_usd}"
         )
         return r.json()
+
+
+# ─── One-click v2 demo flow ──────────────────────────────────────────────
+
+
+@app.post("/demo/one-click-flow")
+async def demo_one_click_flow() -> dict:
+    """
+    Seed `demo/seeds.json` agents into the registry, then walk each one
+    through publish → expected outcome. Returns a step-by-step trace that
+    the demo storyboard narrates over.
+
+    Idempotent: if an ENS name is already registered, the existing record
+    is reused. The endpoint is safe to call repeatedly during recording.
+    """
+    import json as _json
+    import time as _time
+    from pathlib import Path
+
+    from orchestrator.custom_agents import (
+        CreateAgentRequest,
+        create_agent,
+        list_agents,
+        publish_signal,
+    )
+
+    seeds_path = Path("/app/demo/seeds.json")
+    if not seeds_path.exists():
+        raise HTTPException(500, "demo/seeds.json missing in image")
+    seeds = _json.loads(seeds_path.read_text())
+
+    started = _time.time()
+    trace: list[dict] = []
+
+    existing = {a.ens_name: a for a in await list_agents()}
+
+    for entry in seeds["agents"]:
+        ens = entry["ens_name"]
+        if ens in existing:
+            agent_record = existing[ens]
+            trace.append({"step": "register", "ens": ens, "status": "already_registered", "id": agent_record.id})
+        else:
+            req = CreateAgentRequest(
+                display_name=entry["display_name"],
+                ens_name=ens,
+                profile=entry["profile"],
+                token=entry.get("token", "WETH/USDC"),
+                appetite=entry.get("appetite", "balanced"),
+                price_per_signal_usdc=entry.get("price_per_signal_usdc", 0.50),
+                params=entry.get("params", {}),
+            )
+            agent_record = await create_agent(req)
+            trace.append({
+                "step": "register", "ens": ens, "status": "created",
+                "id": agent_record.id, "address": agent_record.address,
+            })
+
+        # Publish a signal
+        pub = await publish_signal(agent_record.id, token=entry.get("token", "WETH/USDC"))
+        if pub.status == "published" and pub.signal:
+            sig = pub.signal
+            trace.append({
+                "step": "publish", "ens": ens, "status": "published",
+                "signal_id": sig.get("signal_id"),
+                "setup": sig.get("metadata", {}).get("setup") or sig.get("metadata", {}).get("rr_structure"),
+                "confidence_bps": sig.get("confidence_bps"),
+                "target": sig.get("target_price"),
+                "stop": sig.get("stop_price"),
+                "horizon_seconds": sig.get("horizon_seconds"),
+            })
+        else:
+            trace.append({
+                "step": "publish", "ens": ens, "status": "no_signal",
+                "reason": pub.reason,
+            })
+
+    # Trigger one trade-pass + one settlement-pass for the lifecycle visual
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            r = await client.post("http://trading-agent:7104/trade?token=WETH%2FUSDC&capital_usd=1000")
+            trace.append({"step": "trade", "status": r.status_code, "body": r.json() if r.status_code == 200 else r.text[:300]})
+        except Exception as e:
+            trace.append({"step": "trade", "status": "error", "error": str(e)})
+
+        try:
+            r = await client.post("http://validator-agent:7106/settle-now")
+            trace.append({"step": "settle", "status": r.status_code, "body": r.json() if r.status_code == 200 else r.text[:300]})
+        except Exception as e:
+            trace.append({"step": "settle", "status": "error", "error": str(e)})
+
+    return {
+        "elapsed_seconds": round(_time.time() - started, 2),
+        "agents_seeded": len(seeds["agents"]),
+        "trace": trace,
+    }
 
 
 @app.get("/api/health")

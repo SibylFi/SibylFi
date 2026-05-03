@@ -1,36 +1,29 @@
 {
-  "_note": "Mock data for MOCK_MODE=1. In real mode, equivalent state lives in ERC-8004 contracts on Sepolia.",
+  "_note": "Mock data for MOCK_MODE=1. v2: two strategy profiles (swing + scalper). Owner addresses MUST match the addresses derived from RESEARCH_MEANREV_KEY / RESEARCH_MOMENTUM_KEY in .env, otherwise the trading agent's signature verification fails.",
   "agents": [
     {
       "agent_id": 1,
-      "owner": "0x9f4a3a18b22ec10a5e7e4b6f3c9a8d2e1b5a7c20",
-      "endpoint": "http://research-meanrev:7101/signal",
-      "ens_name": "reversal.sibyl.eth",
+      "owner": "0x87A63b684De1BA4d3Be9A61fB0E5c8Db0C4AA70b",
+      "endpoint": "http://research-swing:7101/signal",
+      "ens_name": "swing.sibyl.eth",
+      "profile": "swing",
       "registered_at": 1716000000
     },
     {
       "agent_id": 2,
-      "owner": "0x91Bf3a18c8b8e7d2a4f1b9c6e3a7d5f8c2b9e827",
-      "endpoint": "http://research-momentum:7102/signal",
-      "ens_name": "wave.sibyl.eth",
+      "owner": "0xcE56680E2cf0D7415c388Ce90ce61d5Ccec39eeF",
+      "endpoint": "http://research-scalper:7102/signal",
+      "ens_name": "scalper.sibyl.eth",
+      "profile": "scalper",
       "registered_at": 1716100000
-    },
-    {
-      "agent_id": 3,
-      "owner": "0xCE34a7b9d6e3f8c2a5b1d4e7f0c3a6b9d2e5f8a91",
-      "endpoint": "http://research-news:7103/signal",
-      "ens_name": "herald.sibyl.eth",
-      "registered_at": 1716200000
     }
   ],
   "reputation_scores": {
-    "1": 847,
-    "2": 921,
-    "3": 612
+    "1": 0,
+    "2": 0
   },
   "reputation_stats": {
-    "1": { "total_attestations": 1271, "wins": 788, "losses": 483, "score": 847 },
-    "2": { "total_attestations": 879, "wins": 510, "losses": 369, "score": 921 },
-    "3": { "total_attestations": 401, "wins": 217, "losses": 184, "score": 612 }
+    "1": { "total_attestations": 0, "wins": 0, "losses": 0, "score": 0 },
+    "2": { "total_attestations": 0, "wins": 0, "losses": 0, "score": 0 }
   }
 }

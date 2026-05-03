@@ -36,6 +36,7 @@ class AgentRecord:
     endpoint: str
     ens_name: str
     registered_at: int
+    profile: Optional[str] = None    # v2: "swing" | "scalper" (None for legacy entries)
 
 
 @dataclass
@@ -56,6 +57,9 @@ class ERC8004Client:
         self._signer_priv_key = signer_priv_key
         self._mock = self.settings.MOCK_MODE
 
+        # Always load mock data so fallback paths work even in real mode
+        self._mock_data = json.loads(MOCK_DATA_PATH.read_text())
+
         if not self._mock:
             self._w3 = Web3(Web3.HTTPProvider(self.settings.SEPOLIA_RPC))
             self._identity = self._w3.eth.contract(
@@ -66,8 +70,6 @@ class ERC8004Client:
                 address=self._addresses["ERC8004_ReputationRegistry"],
                 abi=self._abis["ReputationRegistry"],
             )
-        else:
-            self._mock_data = json.loads(MOCK_DATA_PATH.read_text())
 
     # ─────────────────────────────────────────────────────────────────
     # Identity
@@ -80,24 +82,39 @@ class ERC8004Client:
                     return AgentRecord(**a)
             raise KeyError(f"agent {agent_id} not in mock data")
 
-        result = self._identity.functions.getAgent(agent_id).call()
-        return AgentRecord(
-            agent_id=agent_id,
-            owner=result[0],
-            endpoint=result[1],
-            ens_name=result[2],
-            registered_at=result[3],
-        )
+        try:
+            result = self._identity.functions.getAgent(agent_id).call()
+            return AgentRecord(
+                agent_id=agent_id,
+                owner=result[0],
+                endpoint=result[1],
+                ens_name=result[2],
+                registered_at=result[3],
+            )
+        except Exception as exc:
+            log.warning("erc8004_get_agent_fallback_to_mock", agent_id=agent_id, error=str(exc))
+            for a in self._mock_data["agents"]:
+                if a["agent_id"] == agent_id:
+                    return AgentRecord(**a)
+            raise KeyError(f"agent {agent_id} not in mock data or on-chain")
 
     def total_agents(self) -> int:
         if self._mock:
             return len(self._mock_data["agents"])
-        return self._identity.functions.totalAgents().call()
+        try:
+            return self._identity.functions.totalAgents().call()
+        except Exception as exc:
+            log.warning("erc8004_total_agents_fallback_to_mock", error=str(exc))
+            return len(self._mock_data["agents"])
 
     def list_agents(self) -> list[AgentRecord]:
         if self._mock:
             return [AgentRecord(**a) for a in self._mock_data["agents"]]
-        return [self.get_agent(i + 1) for i in range(self.total_agents())]
+        try:
+            return [self.get_agent(i + 1) for i in range(self.total_agents())]
+        except Exception as exc:
+            log.warning("erc8004_list_agents_fallback_to_mock", error=str(exc))
+            return [AgentRecord(**a) for a in self._mock_data["agents"]]
 
     # ─────────────────────────────────────────────────────────────────
     # Reputation
@@ -106,7 +123,11 @@ class ERC8004Client:
     def get_reputation_score(self, agent_id: int) -> int:
         if self._mock:
             return self._mock_data["reputation_scores"].get(str(agent_id), 0)
-        return self._reputation.functions.getReputationScore(agent_id).call()
+        try:
+            return self._reputation.functions.getReputationScore(agent_id).call()
+        except Exception as exc:
+            log.warning("erc8004_reputation_fallback_to_mock", agent_id=agent_id, error=str(exc))
+            return self._mock_data["reputation_scores"].get(str(agent_id), 0)
 
     def get_stats(self, agent_id: int) -> ReputationStats:
         if self._mock:
@@ -114,14 +135,20 @@ class ERC8004Client:
             if stats:
                 return ReputationStats(**stats)
             return ReputationStats(total_attestations=0, wins=0, losses=0, score=0)
-
-        result = self._reputation.functions.getStats(agent_id).call()
-        return ReputationStats(
-            total_attestations=result[0],
-            wins=result[1],
-            losses=result[2],
-            score=result[3],
-        )
+        try:
+            result = self._reputation.functions.getStats(agent_id).call()
+            return ReputationStats(
+                total_attestations=result[0],
+                wins=result[1],
+                losses=result[2],
+                score=result[3],
+            )
+        except Exception as exc:
+            log.warning("erc8004_stats_fallback_to_mock", agent_id=agent_id, error=str(exc))
+            stats = self._mock_data["reputation_stats"].get(str(agent_id))
+            if stats:
+                return ReputationStats(**stats)
+            return ReputationStats(total_attestations=0, wins=0, losses=0, score=0)
 
     # ─────────────────────────────────────────────────────────────────
     # Attestation (Validator only)

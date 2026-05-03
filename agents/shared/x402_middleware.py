@@ -106,6 +106,11 @@ def require_payment(price: PriceConfig, recipient_lookup: Optional[Callable[[], 
             log.info("x402_mock_accepted", path=request.url.path, payer_token=x_payment[:16] + "...")
             return None  # OK to proceed
 
+        # Demo bypass: configured token skips CDP facilitator for demo/judging
+        if settings.X402_DEMO_TOKEN and x_payment == settings.X402_DEMO_TOKEN:
+            log.info("x402_demo_token_accepted", path=request.url.path)
+            return None
+
         # Real mode: ask facilitator
         verified = await _verify_with_facilitator(x_payment)
         if not verified:

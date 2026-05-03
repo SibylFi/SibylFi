@@ -11,10 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY agents/requirements.txt /app/agents/requirements.txt
 RUN pip install --no-cache-dir -r /app/agents/requirements.txt
 
-# Copy the agents tree + contracts (for ABI access)
+# Copy the agents tree + contracts (for ABI access) + demo seeds
 COPY agents /app/agents
 COPY orchestrator /app/orchestrator
 COPY contracts /app/contracts
+COPY demo /app/demo
 
 # Each service overrides CMD via docker-compose
 ENV PYTHONPATH=/app

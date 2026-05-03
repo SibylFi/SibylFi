@@ -30,8 +30,8 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class TradeResult:
-    signal: Signal
-    risk: RiskAttestation
+    signal: Signal | None
+    risk: RiskAttestation | None
     quote: Quote | None
     swap: SwapResult | None
     skipped_reason: str | None = None
@@ -68,6 +68,11 @@ class TradingAgent:
         # 2. Pay for and fetch the signal
         signal = await self._buy_signal(chosen, token=token)
 
+        if signal is None:
+            log.info("trading_no_signal_this_bar", ens=chosen.ens_name)
+            return TradeResult(signal=None, risk=None, quote=None, swap=None,
+                               skipped_reason="research_agent_no_signal")
+
         # 3. Verify signature locally (defense-in-depth before paying for risk check)
         if not verify_signal(signal, chosen.owner):
             raise RuntimeError("signal signature mismatch — refusing to act")
@@ -101,7 +106,7 @@ class TradingAgent:
 
     # ─────────────────────────────────────────────────────────────────
 
-    async def _buy_signal(self, agent: AgentRecord, token: str) -> Signal:
+    async def _buy_signal(self, agent: AgentRecord, token: str) -> Signal | None:
         url = f"{agent.endpoint}?token={token}"
         result = await fetch_paywalled(
             url=url,
@@ -109,6 +114,8 @@ class TradingAgent:
             payer_priv_key=self.priv_key,
             method="GET",
         )
+        if result.body is None:
+            return None  # research agent had no signal this bar
         return Signal(**result.body)
 
     async def _call_risk_agent(

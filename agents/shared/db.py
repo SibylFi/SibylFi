@@ -76,6 +76,25 @@ CREATE TABLE IF NOT EXISTS x402_payments (
 
 CREATE INDEX IF NOT EXISTS idx_signals_horizon ON signals(horizon_expires_at) WHERE settled = FALSE;
 CREATE INDEX IF NOT EXISTS idx_executions_signal ON executions(signal_id);
+
+-- Multi-tenant: user-registered Research Agent configs.
+-- Each row is a strategy bundle (profile + params + identity) that the
+-- orchestrator can run on demand. The strategy module is selected by
+-- `profile`; `params_json` is deserialized into the matching dataclass.
+CREATE TABLE IF NOT EXISTS custom_agents (
+    id                BIGSERIAL PRIMARY KEY,
+    ens_name          TEXT UNIQUE NOT NULL,
+    display_name      TEXT NOT NULL,
+    profile           TEXT NOT NULL CHECK (profile IN ('swing', 'scalper')),
+    appetite          TEXT NOT NULL DEFAULT 'balanced'
+                        CHECK (appetite IN ('conservative', 'balanced', 'aggressive')),
+    token             TEXT NOT NULL DEFAULT 'WETH/USDC',
+    price_per_signal_usdc DOUBLE PRECISION NOT NULL DEFAULT 0.50,
+    params_json       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    owner_address     TEXT,
+    private_key       TEXT NOT NULL,        -- agent identity; demo wallets only
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 _pool: AsyncConnectionPool | None = None

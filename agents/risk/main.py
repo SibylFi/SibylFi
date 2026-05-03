@@ -9,7 +9,7 @@ Paywalled via x402 — the Risk Agent earns a small fee for each verification.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 import structlog
 from eth_account import Account
@@ -34,6 +34,7 @@ class VerifyRequest(BaseModel):
     buyer_addr: str
     publisher_addr: str
     pool: PoolMetrics | None = None  # if None, we use mocks
+    appetite: Literal["conservative", "balanced", "aggressive"] = "balanced"
 
 
 @asynccontextmanager
@@ -79,21 +80,26 @@ async def agent_card():
     dependencies=[Depends(require_payment(_price))],
 )
 async def verify(req: VerifyRequest):
-    pool = req.pool or _mock_pool_metrics()
+    pool = req.pool or _mock_pool_metrics(req.signal.entry_condition.reference_price)
     return _checker.check(
         signal=req.signal,
         capital_usd=req.capital_usd,
         pool=pool,
         buyer_addr=req.buyer_addr,
         publisher_addr=req.publisher_addr,
+        appetite=req.appetite,
     )
 
 
-def _mock_pool_metrics() -> PoolMetrics:
+def _mock_pool_metrics(reference_price: float = 3500.0) -> PoolMetrics:
     """Mock pool metrics. In real mode, query Uniswap V3 subgraph."""
+    tvl = 2_500_000.0
     return PoolMetrics(
-        tvl_usd=2_500_000,
+        tvl_usd=tvl,
         expected_slippage_bps_at_size=8,
         atr_24h=0.012,
         atr_30d_avg=0.010,
+        exhaustion_cost=tvl * 0.5,
+        spot_price=reference_price,
+        twap_30m=reference_price,
     )

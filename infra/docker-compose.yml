@@ -50,28 +50,25 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────
-  # Research Agents (3 personas)
+  # Research Agents — v2 (2 profiles)
   # ─────────────────────────────────────────────────────────────────
-  research-meanrev:
+  # All agent ports are bound to 127.0.0.1 only — they are reachable on the
+  # docker network for inter-service traffic (Caddy proxies to them by name)
+  # and on the host for `curl localhost:NNNN` debugging. They are NOT publicly
+  # exposed. The internet only sees Caddy at :80/:443.
+  research-swing:
     <<: *base-python
-    command: ["uvicorn", "agents.research_meanrev.main:app", "--host", "0.0.0.0", "--port", "7101"]
+    command: ["uvicorn", "agents.research_swing.main:app", "--host", "0.0.0.0", "--port", "7101"]
     expose: ["7101"]
-    ports: ["7101:7101"]
-    container_name: research-meanrev
+    ports: ["127.0.0.1:7101:7101"]
+    container_name: research-swing
 
-  research-momentum:
+  research-scalper:
     <<: *base-python
-    command: ["uvicorn", "agents.research_momentum.main:app", "--host", "0.0.0.0", "--port", "7102"]
+    command: ["uvicorn", "agents.research_scalper.main:app", "--host", "0.0.0.0", "--port", "7102"]
     expose: ["7102"]
-    ports: ["7102:7102"]
-    container_name: research-momentum
-
-  research-news:
-    <<: *base-python
-    command: ["uvicorn", "agents.research_news.main:app", "--host", "0.0.0.0", "--port", "7103"]
-    expose: ["7103"]
-    ports: ["7103:7103"]
-    container_name: research-news
+    ports: ["127.0.0.1:7102:7102"]
+    container_name: research-scalper
 
   # ─────────────────────────────────────────────────────────────────
   # Trading + Risk + Validator
@@ -80,21 +77,21 @@ services:
     <<: *base-python
     command: ["uvicorn", "agents.trading.main:app", "--host", "0.0.0.0", "--port", "7104"]
     expose: ["7104"]
-    ports: ["7104:7104"]
+    ports: ["127.0.0.1:7104:7104"]
     container_name: trading-agent
 
   risk-agent:
     <<: *base-python
     command: ["uvicorn", "agents.risk.main:app", "--host", "0.0.0.0", "--port", "7105"]
     expose: ["7105"]
-    ports: ["7105:7105"]
+    ports: ["127.0.0.1:7105:7105"]
     container_name: risk-agent
 
   validator-agent:
     <<: *base-python
     command: ["uvicorn", "agents.validator.main:app", "--host", "0.0.0.0", "--port", "7106"]
     expose: ["7106"]
-    ports: ["7106:7106"]
+    ports: ["127.0.0.1:7106:7106"]
     container_name: validator-agent
 
   # ─────────────────────────────────────────────────────────────────
@@ -104,18 +101,21 @@ services:
     <<: *base-python
     command: ["uvicorn", "orchestrator.main:app", "--host", "0.0.0.0", "--port", "7100"]
     expose: ["7100"]
-    ports: ["7100:7100"]
+    ports: ["127.0.0.1:7100:7100"]
     container_name: orchestrator
 
   # ─────────────────────────────────────────────────────────────────
-  # Frontend
+  # Frontend — internal only. Caddy proxies it on :80/:443.
+  # NB: deliberately NOT loading ../.env. The Next.js app only needs the
+  # public orchestrator URL; loading wallet keys + API keys + DB passwords
+  # into a public-facing service was the blast radius of the May incident.
   # ─────────────────────────────────────────────────────────────────
   frontend:
     build: ../frontend
-    env_file: [../.env]
     environment:
       NEXT_PUBLIC_ORCHESTRATOR_URL: http://orchestrator:7100
-    ports: ["3000:3000"]
+      NODE_ENV: production
+    expose: ["3000"]
     depends_on: [orchestrator]
     networks: [sibylfi]
     restart: unless-stopped

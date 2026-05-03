@@ -1,14 +1,16 @@
 """
-FastAPI factory for Research Agents.
+FastAPI factory for v2 Research Agents.
 
-Each persona's main.py imports build_app(persona_config) and uvicorn runs it.
+The factory wires:
+  • x402-paywalled `/signal` endpoint
+  • A2A `/.well-known/agent-card.json`
+  • Strategy-driven generation; rejection returns 204 (no body).
 """
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 
 from .base_research_agent import BaseResearchAgent, PersonaConfig
 from .db import close_pool, init_pool
@@ -17,8 +19,6 @@ from .x402_middleware import PriceConfig, require_payment
 
 
 def build_research_app(persona: PersonaConfig) -> FastAPI:
-    """Construct the FastAPI app for a Research Agent persona."""
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         setup_logging(persona.name)
@@ -28,7 +28,7 @@ def build_research_app(persona: PersonaConfig) -> FastAPI:
 
     app = FastAPI(
         title=f"SibylFi Research Agent — {persona.ens_name}",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
     agent = BaseResearchAgent(persona)
@@ -43,19 +43,19 @@ def build_research_app(persona: PersonaConfig) -> FastAPI:
         return {
             "ens": persona.ens_name,
             "address": agent.address,
+            "profile": persona.profile,
             "price_per_signal_usdc": persona.price_per_signal_usdc,
-            "horizon_seconds": persona.horizon_seconds,
         }
 
     @app.get("/.well-known/agent-card.json")
     async def agent_card():
-        """A2A protocol-compliant agent card."""
         return {
             "name": persona.ens_name,
-            "description": f"SibylFi Research Agent — {persona.name} persona",
-            "version": "0.1.0",
+            "description": f"SibylFi Research Agent — {persona.profile} profile",
+            "version": "0.2.0",
+            "profile": persona.profile,
             "endpoint": f"http://{persona.ens_name}/signal",
-            "publishes": ["sibylfi.signal/v1"],
+            "publishes": ["sibylfi.signal/v2"],
             "payment": {
                 "scheme": "x402",
                 "asset": "USDC",
@@ -69,29 +69,19 @@ def build_research_app(persona: PersonaConfig) -> FastAPI:
         dependencies=[Depends(require_payment(price))],
     )
     async def get_signal(token: str = "WETH/USDC"):
-        """
-        Generate a fresh signal. Paywalled via x402.
-        """
+        """Generate a fresh signal. 204 if the strategy declines this bar."""
         try:
             signal = await agent.generate_signal(
                 token=token,
-                reference_price=_mock_reference_price(token),
-                published_at_block=12_345_678,  # in real mode, query the chain
+                published_at_block=12_345_678,   # real mode: query chain head
             )
-            return signal.model_dump()
+        except NotImplementedError as e:
+            raise HTTPException(status_code=503, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+        if signal is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return signal.model_dump()
+
     return app
-
-
-def _mock_reference_price(token: str) -> float:
-    """Look up a reference price from the TWAP fixtures. In real mode, query Uniswap V3."""
-    import json
-    from pathlib import Path
-    fixtures = json.loads(
-        (Path(__file__).resolve().parent / "mocks" / "twap_fixtures.json").read_text()
-    )
-    if token in fixtures:
-        return fixtures[token]["ref_price"]
-    return 1.0  # safe default

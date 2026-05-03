@@ -8,7 +8,7 @@
     acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# ─── Local development ───────────────────────────────────────────────
+# ─── Local development — v2 routes ───────────────────────────────────
 :80 {
     handle /api/* {
         reverse_proxy orchestrator:7100
@@ -16,14 +16,11 @@
     handle /demo/* {
         reverse_proxy orchestrator:7100
     }
-    handle /signal/meanrev/* {
-        reverse_proxy research-meanrev:7101
+    handle /signal/swing/* {
+        reverse_proxy research-swing:7101
     }
-    handle /signal/momentum/* {
-        reverse_proxy research-momentum:7102
-    }
-    handle /signal/news/* {
-        reverse_proxy research-news:7103
+    handle /signal/scalper/* {
+        reverse_proxy research-scalper:7102
     }
     handle /verify/* {
         reverse_proxy risk-agent:7105
@@ -39,7 +36,7 @@
 }
 
 # ─── Production hostnames ────────────────────────────────────────────
-# Uncomment and customize when deploying to a real domain.
+# Uncomment when deploying to a real domain.
 #
 # sibylfi.app {
 #     handle /api/*  { reverse_proxy orchestrator:7100 }
@@ -48,12 +45,5 @@
 #     encode gzip
 # }
 #
-# reversal.sibylfi.app {
-#     reverse_proxy research-meanrev:7101
-# }
-# wave.sibylfi.app {
-#     reverse_proxy research-momentum:7102
-# }
-# herald.sibylfi.app {
-#     reverse_proxy research-news:7103
-# }
+# swing.sibylfi.app   { reverse_proxy research-swing:7101 }
+# scalper.sibylfi.app { reverse_proxy research-scalper:7102 }

@@ -33,7 +33,7 @@ from agents.validator.algorithm import (
     reputation_update,
     settle,
 )
-from agents.validator.twap import read_twap_at_horizon
+from agents.validator.twap import read_checkpoints
 
 log = structlog.get_logger(__name__)
 
@@ -135,17 +135,22 @@ async def _settle_one(signal: Signal) -> None:
     # 2. Load executions
     executions = await _load_executions(signal.signal_id)
 
-    # 3. Read TWAP at horizon-end
+    # 3. Read multi-checkpoint TWAP path through the horizon window
     token_pair = signal.token  # e.g. "WETH/USDC" — in real mode, parse CAIP-19 + look up pool
     if "/" not in token_pair:
         token_pair = "WETH/USDC"  # fallback for malformed tokens
-    twap = read_twap_at_horizon(token=token_pair, horizon_seconds=signal.horizon_seconds)
+    checkpoints = read_checkpoints(
+        token=token_pair,
+        published_at_block=signal.published_at_block,
+        horizon_seconds=signal.horizon_seconds,
+        n_checkpoints=5,
+    )
 
     # 4. Run the algorithm
     settlement = settle(SettlementInputs(
         signal=signal,
         publisher_addr=publisher_addr,
-        twap_at_horizon=twap,
+        checkpoints=checkpoints,
         executions=executions,
         eth_usd_at_horizon=3450.0,  # mock; real mode reads ETH/USD oracle
         base_sepolia_gas_price_wei=1_000_000_000,  # 1 gwei mock

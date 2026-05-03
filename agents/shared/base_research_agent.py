@@ -1,16 +1,29 @@
 """
-Base Research Agent.
+Base Research Agent — v2.
 
-Each persona (mean-rev, momentum, news-driven) inherits from this. The
-persona-specific code is tiny — just the prompt and the reference-price
-selection logic. Everything else (signing, x402 paywall, persistence) is
-shared.
+The persona-specific code is reduced to: choose a profile (swing | scalper),
+provide tuning params, and write a calibrator prompt template. Everything
+else (feature loading, strategy evaluation, LLM calibration, signing,
+x402 paywall, persistence) is shared.
+
+Decision flow:
+  1. Load features for `token` from the feature provider (MOCK_MODE-aware).
+  2. Run `evaluate_swing` or `evaluate_scalper`.
+  3. If the strategy rejects → return None; the route turns this into 204.
+  4. Otherwise call the LLM (mock or 0G) ONLY to:
+       - emit a confidence delta in [-1000, +1000] bps, and
+       - write a 1-sentence thesis.
+     The LLM cannot flip direction (long-only at schema layer) and cannot
+     reject signals (the strategy already accepted).
+  5. confidence_final = clamp(strategy_base + llm_delta, 0, strategy_cap).
+  6. Build, sign, persist, return.
 """
 from __future__ import annotations
 
 import re
 import secrets
 from dataclasses import dataclass
+from typing import Literal
 
 import structlog
 from eth_account import Account
@@ -20,18 +33,32 @@ from agents.shared.inference import infer
 from agents.shared.settings import get_settings
 from agents.shared.signal_schema import EntryCondition, Signal
 from agents.shared.signing import sign_signal
+from agents.shared.strategies.feature_provider import load_features
+from agents.shared.strategies.scalper import evaluate_scalper
+from agents.shared.strategies.snapshot import (
+    ScalperFeatures,
+    ScalperParams,
+    StrategyResult,
+    SwingFeatures,
+    SwingParams,
+)
+from agents.shared.strategies.swing import evaluate_swing
 
 log = structlog.get_logger(__name__)
+
+Profile = Literal["swing", "scalper"]
 
 
 @dataclass
 class PersonaConfig:
-    name: str            # e.g., "meanrev"
-    ens_name: str        # e.g., "reversal.sibyl.eth"
+    name: str                                # short id, e.g. "swing"
+    profile: Profile                         # which strategy to run
+    ens_name: str                            # e.g. "swing.sibyl.eth"
     private_key: str
     price_per_signal_usdc: float
-    prompt_template: str
-    horizon_seconds: int
+    prompt_template: str                     # for the LLM calibrator
+    swing_params: SwingParams | None = None
+    scalper_params: ScalperParams | None = None
 
 
 class BaseResearchAgent:
@@ -39,70 +66,138 @@ class BaseResearchAgent:
         self.persona = persona
         self.settings = get_settings()
         self.address = Account.from_key(persona.private_key).address
+        # Last strategy evaluation; the API layer reads this after generate_signal
+        # returns None to surface the rejection reason to the caller.
+        self.last_strategy_result: StrategyResult | None = None
+
+    # ── Public entrypoint ────────────────────────────────────────────────
 
     async def generate_signal(
         self,
         token: str,
-        reference_price: float,
         published_at_block: int,
-    ) -> Signal:
-        """Run inference, parse the response, build a signed Signal."""
+    ) -> Signal | None:
+        features = load_features(self.persona.profile, token)
+        result = self._evaluate(features)
+        self.last_strategy_result = result
 
+        if not result.accept:
+            log.info(
+                "strategy_rejected",
+                persona=self.persona.name,
+                profile=self.persona.profile,
+                token=token,
+                reason=result.reason,
+            )
+            return None
+
+        delta, thesis, backend = await self._calibrate(token, result)
+
+        cap = result.confidence_bps_cap or 10000
+        base = result.confidence_bps_base or 0
+        confidence_final = max(0, min(cap, base + delta))
+
+        signal = self._build_and_sign(
+            token=token,
+            result=result,
+            confidence_bps=confidence_final,
+            thesis=thesis,
+            published_at_block=published_at_block,
+        )
+
+        log.info(
+            "signal_generated",
+            signal_id=signal.signal_id,
+            persona=self.persona.name,
+            profile=self.persona.profile,
+            setup=result.setup,
+            confidence_bps=confidence_final,
+            confidence_base=base,
+            confidence_delta=delta,
+            target=signal.target_price,
+            stop=signal.stop_price,
+            horizon=signal.horizon_seconds,
+            backend=backend,
+        )
+
+        await self._persist(signal)
+        return signal
+
+    # ── Strategy dispatch ────────────────────────────────────────────────
+
+    def _evaluate(self, features) -> StrategyResult:
+        if self.persona.profile == "swing":
+            assert isinstance(features, SwingFeatures)
+            return evaluate_swing(features, self.persona.swing_params)
+        if self.persona.profile == "scalper":
+            assert isinstance(features, ScalperFeatures)
+            return evaluate_scalper(features, self.persona.scalper_params)
+        raise ValueError(f"unknown profile: {self.persona.profile}")
+
+    # ── LLM calibrator (advisory only) ───────────────────────────────────
+
+    async def _calibrate(
+        self,
+        token: str,
+        result: StrategyResult,
+    ) -> tuple[int, str, str]:
+        """Returns (confidence_delta_bps, thesis, backend)."""
         prompt = self.persona.prompt_template.format(
             token=token,
-            reference_price=reference_price,
+            profile=self.persona.profile,
+            setup=result.setup,
+            confidence_base=result.confidence_bps_base,
+            confidence_cap=result.confidence_bps_cap,
+            reference_price=result.reference_price,
+            target_price=result.target_price,
+            stop_price=result.stop_price,
+            horizon_seconds=result.horizon_seconds,
         )
-        result = await infer(prompt, persona=self.persona.name, max_tokens=256)
+        out = await infer(prompt, persona=self.persona.name, max_tokens=256)
+        delta, thesis = _parse_calibration(out.text)
+        return delta, thesis, out.backend
 
-        direction, confidence_bps = _parse_inference(result.text)
+    # ── Signal construction ──────────────────────────────────────────────
 
-        # Compute target/stop prices from direction and confidence
-        target_pct = _confidence_to_target_pct(confidence_bps)
-        if direction == "long":
-            target_price = reference_price * (1 + target_pct)
-            stop_price = reference_price * (1 - target_pct * 0.6)  # tighter stop than target
-        else:
-            target_price = reference_price * (1 - target_pct)
-            stop_price = reference_price * (1 + target_pct * 0.6)
-
+    def _build_and_sign(
+        self,
+        *,
+        token: str,
+        result: StrategyResult,
+        confidence_bps: int,
+        thesis: str,
+        published_at_block: int,
+    ) -> Signal:
         signal_id = "0x" + secrets.token_hex(32)
+
+        metadata = dict(result.metadata or {})
+        metadata["thesis"] = thesis
+        metadata["profile"] = self.persona.profile
 
         unsigned = Signal(
             signal_id=signal_id,
             publisher=self.persona.ens_name,
             token=token,
-            direction=direction,
+            direction="long",                          # schema-enforced
             entry_condition=EntryCondition(
                 type="market_at_publication",
-                reference_price=reference_price,
+                reference_price=result.reference_price,
             ),
-            target_price=round(target_price, 4),
-            stop_price=round(stop_price, 4),
-            horizon_seconds=self.persona.horizon_seconds,
+            target_price=round(result.target_price, 6),
+            stop_price=round(result.stop_price, 6),
+            horizon_seconds=result.horizon_seconds,
             confidence_bps=confidence_bps,
             published_at_block=published_at_block,
-            signature="0x00",  # placeholder; replaced below
+            metadata=metadata,
+            signature="0x00",
         )
 
-        # Sign and stamp
         sig_hex = sign_signal(unsigned, self.persona.private_key)
-        signed = unsigned.model_copy(update={"signature": sig_hex})
+        return unsigned.model_copy(update={"signature": sig_hex})
 
-        log.info(
-            "signal_generated",
-            signal_id=signal_id,
-            persona=self.persona.name,
-            direction=direction,
-            confidence_bps=confidence_bps,
-            target=signed.target_price,
-            backend=result.backend,
-        )
-
-        await self._persist(signed)
-        return signed
+    # ── Persistence ──────────────────────────────────────────────────────
 
     async def _persist(self, signal: Signal) -> None:
-        """Write signal to Postgres signal log."""
         async with db_conn() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -135,35 +230,34 @@ class BaseResearchAgent:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Inference parsing
+# Calibration parsing
 # ─────────────────────────────────────────────────────────────────────────
 
-_DIRECTION_RE = re.compile(r"DIRECTION:\s*(LONG|SHORT)", re.IGNORECASE)
-_CONFIDENCE_RE = re.compile(r"CONFIDENCE_BPS:\s*(\d{1,5})", re.IGNORECASE)
+_DELTA_RE = re.compile(r"CONFIDENCE_DELTA:\s*([+\-]?\d{1,4})", re.IGNORECASE)
+_THESIS_RE = re.compile(r"THESIS:\s*(.+?)(?:\n|$)", re.IGNORECASE | re.DOTALL)
 
 
-def _parse_inference(text: str) -> tuple[str, int]:
-    """Extract direction and confidence_bps from the model's response text."""
-    direction_match = _DIRECTION_RE.search(text)
-    confidence_match = _CONFIDENCE_RE.search(text)
+def _parse_calibration(text: str) -> tuple[int, str]:
+    """Parse the LLM calibrator's response.
 
-    direction = (direction_match.group(1).lower() if direction_match else "long")
-    if direction not in ("long", "short"):
-        direction = "long"
+    Expected (case-insensitive):
+        CONFIDENCE_DELTA: <signed integer in bps>
+        THESIS: <one sentence>
 
-    confidence_bps = int(confidence_match.group(1)) if confidence_match else 5500
-    confidence_bps = max(0, min(10000, confidence_bps))
-
-    return direction, confidence_bps
-
-
-def _confidence_to_target_pct(confidence_bps: int) -> float:
+    Bounds: delta clamped to [-1000, +1000] so the LLM cannot dominate the
+    rule-based base. Missing fields fall back to (0, "Calibration unavailable.").
     """
-    Higher confidence → larger target. Capped so targets stay realistic.
+    m_delta = _DELTA_RE.search(text)
+    m_thesis = _THESIS_RE.search(text)
 
-    confidence_bps 5000 (50%) → 0.4% target
-    confidence_bps 7000 (70%) → 0.8% target
-    confidence_bps 9000 (90%) → 1.4% target
-    """
-    pct = 0.001 + (confidence_bps - 5000) / 5000 * 0.012  # linear from 0.1% to 1.4%
-    return max(0.001, min(0.025, pct))
+    if m_delta:
+        try:
+            delta = int(m_delta.group(1))
+        except ValueError:
+            delta = 0
+    else:
+        delta = 0
+    delta = max(-1000, min(1000, delta))
+
+    thesis = m_thesis.group(1).strip() if m_thesis else "Calibration unavailable."
+    return delta, thesis

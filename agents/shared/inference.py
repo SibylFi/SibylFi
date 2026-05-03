@@ -60,24 +60,26 @@ async def infer(prompt: str, *, persona: str = "default", max_tokens: int = 256)
 
 def _mock_inference(prompt: str, persona: str, max_tokens: int) -> InferenceResult:
     """
-    Deterministic mock — same prompt + persona always returns same output.
-    Used for offline development and reproducible tests.
+    Deterministic calibrator mock.
+
+    The LLM is *advisory* in v2 — the strategy module already decided
+    direction and a base confidence. The mock therefore emits:
+      CONFIDENCE_DELTA: <signed bps>
+      THESIS: <one sentence>
+    The delta is bounded to ±300 in mock mode (well under the agent's ±1000
+    safety clamp) so the rule-based engine remains dominant.
     """
     seed = hashlib.sha256((persona + prompt).encode()).hexdigest()
-    # Pick a directional bias and confidence from the seed
-    direction = "long" if int(seed[:2], 16) > 127 else "short"
-    confidence = 5000 + int(seed[2:6], 16) % 4000  # 5000-9000 bps
+    delta = (int(seed[:4], 16) % 601) - 300       # uniform on [-300, +300]
 
     persona_voice = {
-        "meanrev": "Reversion thesis active; price extension exceeds 2σ from rolling mean.",
-        "momentum": "Trend continuation indicated; 4h close above prior breakout band.",
-        "news": "Sentiment delta positive on token mentions in last 30min; volume confirms.",
-        "default": "Signal conditions met."
-    }.get(persona, "Signal conditions met.")
+        "swing":   "EMA stack + Dow streak + bull divergence + EMA10 pullback all confirmed; multi-TP risk skewed favourable.",
+        "scalper": "Adaptive setup score above mode threshold; multi-asset consensus bullish; trailing-ATR exit primed.",
+        "default": "Strategy gates passed; calibration nominal.",
+    }.get(persona, "Strategy gates passed; calibration nominal.")
 
     text = (
-        f"DIRECTION: {direction.upper()}\n"
-        f"CONFIDENCE_BPS: {confidence}\n"
+        f"CONFIDENCE_DELTA: {delta:+d}\n"
         f"THESIS: {persona_voice}"
     )
     return InferenceResult(text=text, model="mock-deterministic", backend="mock")

@@ -61,3 +61,151 @@ html, body {
 ::-webkit-scrollbar-track { background: var(--sf-void-100); }
 ::-webkit-scrollbar-thumb { background: var(--sf-void-400); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--sf-violet-700); }
+
+/* ─── Custom Agent Registration form (v2) ──────────────────────────── */
+.agent-form {
+  max-width: 920px;
+  margin: 32px auto 64px;
+  padding: 28px 32px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border-violet);
+  border-radius: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.agent-form h2 {
+  font-family: 'Cinzel', serif;
+  color: var(--sf-gold-300);
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+.agent-form h3 {
+  margin-top: 28px;
+  color: var(--sf-violet-300);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.agent-form__sub {
+  color: var(--sf-fg-dim);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.agent-form__sub code {
+  color: var(--sf-gold-300);
+  background: var(--sf-void-200);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.agent-form__tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.agent-form .tab {
+  padding: 8px 18px;
+  background: var(--sf-void-100);
+  color: var(--sf-fg-dim);
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.agent-form .tab--active {
+  background: var(--sf-violet-700);
+  color: var(--sf-fg);
+  border-color: var(--sf-violet-500);
+}
+.agent-form__form .row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.agent-form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--sf-fg-dim);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.agent-form input,
+.agent-form select {
+  padding: 8px 10px;
+  background: var(--sf-void-050);
+  color: var(--sf-fg);
+  border: 1px solid var(--sf-border);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+.agent-form input:focus,
+.agent-form select:focus { border-color: var(--sf-violet-500); outline: none; }
+.agent-form small { color: var(--sf-fg-mute); font-size: 11px; }
+.agent-form__params {
+  border: 1px dashed var(--sf-border);
+  padding: 14px 18px;
+  margin: 18px 0;
+  border-radius: 6px;
+}
+.agent-form__params legend {
+  color: var(--sf-gold-300);
+  padding: 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.agent-form__params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.agent-form button[type="submit"],
+.agent-form button {
+  padding: 9px 16px;
+  background: var(--sf-gold-500);
+  color: var(--sf-void-000);
+  border: none;
+  border-radius: 4px;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.agent-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.agent-form button:hover:not(:disabled) { background: var(--sf-gold-300); }
+.agent-form__msg { margin-top: 12px; font-size: 13px; }
+.agent-form__msg--ok  { color: var(--sf-signal-win); }
+.agent-form__msg--err { color: var(--sf-signal-loss); }
+.agent-form__empty { color: var(--sf-fg-mute); font-size: 13px; }
+.agent-form__list { list-style: none; padding: 0; margin: 8px 0; }
+.agent-form__row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px;
+  background: var(--sf-void-100);
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.agent-form__row-meta strong { color: var(--sf-fg); }
+.agent-form__row-meta code {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--sf-violet-300);
+  font-size: 12px;
+}
+.agent-form__row-meta small {
+  display: block;
+  color: var(--sf-fg-mute);
+  font-size: 11px;
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.agent-form__row-actions { display: flex; gap: 8px; }
+.agent-form__row-actions button {
+  background: var(--sf-violet-700);
+  color: var(--sf-fg);
+}
+.agent-form__row-actions button:hover { background: var(--sf-violet-600); }
+.agent-form__publog { padding-left: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.agent-form__publog code { color: var(--sf-fg-dim); }

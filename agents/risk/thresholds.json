@@ -1,9 +1,43 @@
 {
-  "_note": "Risk Agent's deterministic thresholds. Per the signal-validator-spec skill, these MUST be readable from a config file, not hardcoded.",
-  "max_capital_pct_of_pool_tvl": 0.05,
-  "max_slippage_bps": 25,
-  "max_volatility_atr_multiple": 4.0,
-  "min_pool_tvl_usd": 10000,
-  "max_horizon_seconds": 86400,
-  "min_horizon_seconds": 900
+  "_note": "Profile-keyed risk thresholds. v2 long-only. Source: agent-risk.md §3-4. Profile is auto-detected from signal.horizon_seconds: <=7200s scalper, >=86400s swing, else intraday.",
+  "swing": {
+    "min_rr": 2.5,
+    "max_position_pct_capital": 0.02,
+    "max_stop_pct": 0.010,
+    "max_slippage_bps": 150,
+    "min_pool_tvl_usd": 100000,
+    "max_spot_twap_dev": 0.030,
+    "min_confidence_bps": 7500,
+    "max_horizon_seconds": 1209600,
+    "min_horizon_seconds": 14400
+  },
+  "scalper": {
+    "min_rr": 2.0,
+    "max_position_pct_capital": 0.02,
+    "max_stop_pct": 0.010,
+    "max_slippage_bps": 80,
+    "min_pool_tvl_usd": 100000,
+    "max_spot_twap_dev": 0.015,
+    "min_confidence_bps": 5500,
+    "max_horizon_seconds": 7200,
+    "min_horizon_seconds": 300
+  },
+  "intraday": {
+    "min_rr": 2.0,
+    "max_position_pct_capital": 0.02,
+    "max_stop_pct": 0.015,
+    "max_slippage_bps": 120,
+    "min_pool_tvl_usd": 100000,
+    "max_spot_twap_dev": 0.020,
+    "min_confidence_bps": 6500,
+    "max_horizon_seconds": 86399,
+    "min_horizon_seconds": 7201
+  },
+  "global": {
+    "max_position_size_usd_cap": 500,
+    "elder_max_30d_loss_pct": 0.06,
+    "stop_too_close_pct": 0.003,
+    "exhaustion_cost_max_position_ratio": 0.10,
+    "elder_risk_pct_per_trade": 0.01
+  }
 }

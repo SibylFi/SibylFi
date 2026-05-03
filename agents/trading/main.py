@@ -35,10 +35,10 @@ async def trade(token: str = "WETH/USDC", capital_usd: float = 1000.0):
     """
     result = await _agent.discover_and_trade(token=token, capital_usd=capital_usd)
     return {
-        "signal_id": result.signal.signal_id,
-        "publisher": result.signal.publisher,
-        "direction": result.signal.direction,
-        "risk_passed": result.risk.pass_,
+        "signal_id": result.signal.signal_id if result.signal else None,
+        "publisher": result.signal.publisher if result.signal else None,
+        "direction": result.signal.direction if result.signal else None,
+        "risk_passed": result.risk.pass_ if result.risk else None,
         "skipped_reason": result.skipped_reason,
         "tx_hash": result.swap.tx_hash if result.swap else None,
         "gas_used": result.swap.gas_used if result.swap else None,

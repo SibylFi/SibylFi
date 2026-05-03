@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 # Type aliases
 # ─────────────────────────────────────────────────────────────────────────
 
-Direction = Literal["long", "short"]
+Direction = Literal["long"]  # v2: long-only — short is rejected at schema, risk, and validator layers
 Hex32 = Annotated[str, Field(pattern=r"^0x[0-9a-fA-F]{64}$")]
 HexSig = Annotated[str, Field(pattern=r"^0x[0-9a-fA-F]+$")]
 EnsName = Annotated[str, Field(pattern=r"^[a-z0-9-]+\.sibyl\.eth$")]
@@ -48,20 +48,18 @@ class EntryCondition(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────
 
 class Signal(BaseModel):
-    """
-    A signed trading signal. The signature covers the canonicalized JSON of
-    every other field — see canonicalize() and verify_signature().
-    """
+    """A signed trading signal. Long-only in v2."""
     signal_id: Hex32
     publisher: EnsName
     token: str  # CAIP-19 token identifier, e.g. eip155:84532/erc20:0x...
-    direction: Direction
+    direction: Direction               # always "long" in v2
     entry_condition: EntryCondition
     target_price: float
     stop_price: float
-    horizon_seconds: int = Field(ge=900, le=86400)  # 15min to 24h
+    horizon_seconds: int = Field(ge=300, le=1_209_600)  # 5 min – 14 days (covers Scalper 1m & Position roadmap)
     confidence_bps: int = Field(ge=0, le=10000)
     published_at_block: int
+    metadata: dict[str, Any] | None = None      # tp1, setup, tf, bullish_consensus, etc.
     signature: HexSig
 
     @field_validator("target_price", "stop_price")
@@ -86,19 +84,32 @@ class Signal(BaseModel):
 
 class RiskCheck(str, Enum):
     POSITION_SIZE = "position_size"
+    RR_INSUFFICIENT = "rr_insufficient"
+    STOP_TOO_WIDE = "stop_too_wide"
     SLIPPAGE = "slippage"
-    VOLATILITY = "volatility"
     LIQUIDITY = "liquidity"
+    EXHAUSTION = "exhaustion"
+    TWAP_DEVIATION = "twap_deviation"
+    STOP_TOO_CLOSE = "stop_too_close"
     SELF_PURCHASE = "self_purchase"
+    ELDER_MONTH_RULE = "elder_month_rule"
+    MULTI_TP_INVALID = "multi_tp_invalid"
+    NON_LONG_REJECTED = "non_long_rejected"
 
 
 class RiskAttestation(BaseModel):
-    """Risk Agent's signed attestation that a signal passes deterministic checks."""
+    """Risk Agent's signed attestation. Profile-aware in v2."""
     signal_id: Hex32
     pass_: bool = Field(alias="pass")
     failed_checks: list[RiskCheck] = Field(default_factory=list)
+    profile: Literal["swing", "scalper", "intraday"]
+    appetite: Literal["conservative", "balanced", "aggressive"]
+    position_size_usd: float
+    rr_ratio: float
     expected_slippage_bps: int
     pool_tvl_usd: float
+    spot_twap_deviation: float
+    multi_tp: bool = False
     risk_attester: str  # ENS or address
     signature: HexSig
 
@@ -112,8 +123,11 @@ class RiskAttestation(BaseModel):
 class Outcome(str, Enum):
     PENDING = "pending"
     WIN = "win"
+    WIN_PARTIAL = "win_partial"   # TP1 hit but stop hit before TP2 (swing multi-TP)
     LOSS = "loss"
     EXPIRED = "expired"
+    INCONCLUSIVE = "inconclusive" # oracle data gap, not agent's fault
+    INVALID = "invalid"           # reference price mismatch, fraud-grade
 
 
 class Settlement(BaseModel):

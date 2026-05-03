@@ -1,164 +1,82 @@
 import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
+import { sibylfi } from '../lib/api';
 
 // ─────────────────────────────────────────────────────────────────────
-// MOCK DATA — six oracular agents
+// AGENT / SIGNAL MAPPING  — converts API responses → component shape
 // ─────────────────────────────────────────────────────────────────────
-const AGENTS = [
-  {
-    id: 'reversal',
-    name: 'The Reversal',
-    ens: 'reversal.sibyl.eth',
-    addr: '0x9f4a...20a7',
-    archetype: 'MEAN-REVERSION ORACLE',
-    epigraph: 'What overshoots must return. What returns must overshoot.',
-    sigil: 'reversal',
-    color: '#d4af37',
-    roi7d: 18.4,
-    roi30d: 42.1,
-    winRate: 0.62,
-    signalsEmitted: 1284,
-    signalsValidated: 1271,
-    capitalServed: 412800,
-    pricePerSignal: 0.50,
-    horizonAvg: '1h',
-    confidence: 6700,
-    reputation: 847,
-    rank: 1,
-    rankPrev: 2,
-    cold: false,
-    spark: [42, 38, 41, 39, 44, 47, 45, 49, 52, 55, 53, 58, 61, 64, 62, 67, 70, 73, 71, 76, 79, 82, 80, 84],
-  },
-  {
-    id: 'wave',
-    name: 'The Wave',
-    ens: 'wave.sibyl.eth',
-    addr: '0x91Bf...8c27',
-    archetype: 'MOMENTUM CARTOGRAPHER',
-    epigraph: 'Trend is a river. The agent who names it has already crossed.',
-    sigil: 'wave',
-    color: '#9b6dff',
-    roi7d: 22.7,
-    roi30d: 38.9,
-    winRate: 0.58,
-    signalsEmitted: 892,
-    signalsValidated: 879,
-    capitalServed: 612300,
-    pricePerSignal: 0.75,
-    horizonAvg: '4h',
-    confidence: 7100,
-    reputation: 921,
-    rank: 2,
-    rankPrev: 1,
-    cold: false,
-    spark: [55, 58, 62, 60, 64, 67, 71, 68, 72, 76, 79, 75, 78, 82, 85, 81, 84, 87, 89, 86, 88, 91, 93, 90],
-  },
-  {
-    id: 'herald',
-    name: 'The Herald',
-    ens: 'herald.sibyl.eth',
-    addr: '0xCE34...2a91',
-    archetype: 'EVENT TELEMANCER',
-    epigraph: 'Every announcement is an echo. The Herald hears it before the wall.',
-    sigil: 'herald',
-    color: '#22d3ee',
-    roi7d: 11.2,
-    roi30d: 28.4,
-    winRate: 0.54,
-    signalsEmitted: 412,
-    signalsValidated: 401,
-    capitalServed: 198400,
-    pricePerSignal: 1.20,
-    horizonAvg: '30m',
-    confidence: 5800,
-    reputation: 612,
-    rank: 3,
-    rankPrev: 3,
-    cold: false,
-    spark: [60, 58, 62, 65, 60, 63, 67, 64, 68, 72, 69, 71, 74, 70, 73, 76, 72, 75, 78, 74, 77, 80, 76, 79],
-  },
-  {
-    id: 'spire',
-    name: 'The Spire',
-    ens: 'spire.sibyl.eth',
-    addr: '0x4F88...91d3',
-    archetype: 'VARIANCE WEAVER',
-    epigraph: 'Stillness is a costume. The Spire reads what the calm conceals.',
-    sigil: 'spire',
-    color: '#f472b6',
-    roi7d: 7.8,
-    roi30d: 19.2,
-    winRate: 0.51,
-    signalsEmitted: 318,
-    signalsValidated: 305,
-    capitalServed: 84200,
-    pricePerSignal: 0.95,
-    horizonAvg: '2h',
-    confidence: 5200,
-    reputation: 488,
-    rank: 4,
-    rankPrev: 5,
-    cold: false,
-    spark: [50, 53, 51, 55, 52, 56, 54, 58, 56, 60, 58, 62, 59, 63, 61, 65, 63, 67, 64, 68, 66, 70, 68, 72],
-  },
-  {
-    id: 'veil',
-    name: 'The Veil',
-    ens: 'veil.sibyl.eth',
-    addr: '0xA210...77b4',
-    archetype: 'AFFECT DIVINER',
-    epigraph: 'The crowd whispers truths in mistakes. The Veil records them.',
-    sigil: 'veil',
-    color: '#4ade80',
-    roi7d: 4.1,
-    roi30d: 12.7,
-    winRate: 0.49,
-    signalsEmitted: 156,
-    signalsValidated: 148,
-    capitalServed: 41600,
-    pricePerSignal: 0.40,
-    horizonAvg: '6h',
-    confidence: 4900,
-    reputation: 312,
-    rank: 5,
-    rankPrev: 4,
-    cold: true,
-    spark: [48, 45, 47, 44, 46, 43, 45, 47, 44, 46, 48, 50, 47, 49, 51, 48, 50, 52, 49, 51, 53, 50, 52, 54],
-  },
-  {
-    id: 'ember',
-    name: 'The Ember',
-    ens: 'ember.sibyl.eth',
-    addr: '0x7Aa3...4f12',
-    archetype: 'ORDERBOOK NECROMANCER',
-    epigraph: 'Where liquidity gathers, fate gathers also.',
-    sigil: 'ember',
-    color: '#fbbf24',
-    roi7d: -2.4,
-    roi30d: 6.1,
-    winRate: 0.46,
-    signalsEmitted: 89,
-    signalsValidated: 84,
-    capitalServed: 22100,
-    pricePerSignal: 0.65,
-    horizonAvg: '15m',
-    confidence: 4200,
-    reputation: 184,
-    rank: 6,
-    rankPrev: 6,
-    cold: true,
-    spark: [52, 50, 51, 49, 50, 48, 49, 47, 48, 46, 48, 47, 49, 47, 48, 46, 47, 48, 50, 48, 49, 51, 49, 50],
-  },
-];
+const PROFILE_SIGIL    = { swing: 'reversal', scalper: 'wave' };
+const PROFILE_COLOR    = { swing: '#d4af37',  scalper: '#9b6dff' };
+const PROFILE_ARCH     = { swing: 'SWING ORACLE', scalper: 'SCALPER ORACLE' };
+const PROFILE_EPIGRAPH = {
+  swing:   'Trend is confluence. The patient oracle waits for the stack to align.',
+  scalper: 'Speed is alpha. Every tick is a chance to read the flow before others.',
+};
+const FALLBACK_SIGILS = ['reversal', 'wave', 'herald', 'spire', 'veil', 'ember'];
+const FALLBACK_COLORS = ['#d4af37', '#9b6dff', '#22d3ee', '#f472b6', '#4ade80', '#fbbf24'];
 
-const SIGNALS = [
-  { id: '0x4e9f...c10a', publisher: 'reversal', token: 'WETH/USDC', direction: 'long', refPrice: 3450.21, targetPrice: 3485.00, stopPrice: 3430.00, horizon: 3600, horizonRemaining: 1842, confidence: 6700, status: 'live', capital: 12400, buyers: 7, publishedAt: '00:14:23 ago' },
-  { id: '0x8a2c...41bb', publisher: 'wave', token: 'WBTC/USDC', direction: 'long', refPrice: 67234.50, targetPrice: 68100.00, stopPrice: 66800.00, horizon: 14400, horizonRemaining: 8920, confidence: 7100, status: 'live', capital: 28100, buyers: 14, publishedAt: '01:31:08 ago' },
-  { id: '0x2f1e...9d44', publisher: 'herald', token: 'ENA/USDC', direction: 'short', refPrice: 0.4821, targetPrice: 0.4680, stopPrice: 0.4920, horizon: 1800, horizonRemaining: 0, confidence: 5800, status: 'settled-win', capital: 4200, buyers: 3, pnlBps: 218, publishedAt: '00:32:51 ago' },
-  { id: '0xd71a...07cc', publisher: 'spire', token: 'LINK/USDC', direction: 'long', refPrice: 14.82, targetPrice: 15.20, stopPrice: 14.55, horizon: 7200, horizonRemaining: 2104, confidence: 5200, status: 'risk-flagged', capital: 1800, buyers: 1, publishedAt: '01:21:11 ago' },
-  { id: '0x5b3e...88a1', publisher: 'wave', token: 'ARB/USDC', direction: 'long', refPrice: 0.842, targetPrice: 0.872, stopPrice: 0.830, horizon: 14400, horizonRemaining: 0, confidence: 6900, status: 'settled-loss', capital: 8400, buyers: 5, pnlBps: -127, publishedAt: '04:02:14 ago' },
-  { id: '0xe04c...3a09', publisher: 'reversal', token: 'OP/USDC', direction: 'short', refPrice: 1.842, targetPrice: 1.812, stopPrice: 1.860, horizon: 3600, horizonRemaining: 0, confidence: 6500, status: 'settled-win', capital: 6100, buyers: 4, pnlBps: 162, publishedAt: '01:14:39 ago' },
-  { id: '0x9c8d...51fe', publisher: 'veil', token: 'PEPE/USDC', direction: 'long', refPrice: 0.00000812, targetPrice: 0.00000840, stopPrice: 0.00000795, horizon: 21600, horizonRemaining: 18402, confidence: 4900, status: 'live', capital: 920, buyers: 2, publishedAt: '00:04:18 ago' },
-];
+function mapAgent(entry, rank, rankPrev) {
+  const prefix = (entry.ens_name || '').split('.')[0];
+  const i = (rank - 1) % FALLBACK_SIGILS.length;
+  return {
+    id:               entry.ens_name,
+    name:             prefix.charAt(0).toUpperCase() + prefix.slice(1) + ' Agent',
+    ens:              entry.ens_name,
+    addr:             entry.address ? entry.address.slice(0, 6) + '…' + entry.address.slice(-4) : '0x???',
+    archetype:        PROFILE_ARCH[prefix]     || 'ORACLE',
+    epigraph:         PROFILE_EPIGRAPH[prefix] || 'The sibyl sees what others miss.',
+    sigil:            PROFILE_SIGIL[prefix]    || FALLBACK_SIGILS[i],
+    color:            PROFILE_COLOR[prefix]    || FALLBACK_COLORS[i],
+    roi7d:            (entry.roi_7d_bps || 0) / 100,
+    roi30d:           0,
+    winRate:          entry.win_rate || 0,
+    signalsEmitted:   entry.total_attestations || 0,
+    signalsValidated: (entry.wins || 0) + (entry.losses || 0),
+    capitalServed:    entry.capital_served_usd || 0,
+    pricePerSignal:   0.50,
+    horizonAvg:       'N/A',
+    confidence:       5000,
+    reputation:       entry.reputation_score || 0,
+    rank,
+    rankPrev:         rankPrev !== undefined ? rankPrev : rank,
+    cold:             entry.cold_start || false,
+    spark:            [],
+  };
+}
+
+function mapSignal(row) {
+  const now   = Date.now();
+  const expMs = row.horizon_expires_at ? new Date(row.horizon_expires_at).getTime() : now;
+  const horizonRemaining = Math.max(0, Math.floor((expMs - now) / 1000));
+  let status;
+  if (!row.settled)               status = 'live';
+  else if (row.outcome === 'win') status = 'settled-win';
+  else if (row.outcome === 'loss') status = 'settled-loss';
+  else                            status = 'expired';
+  const pubMs   = new Date(row.published_at).getTime();
+  const agoSecs = Math.max(0, Math.floor((Date.now() - pubMs) / 1000));
+  const publishedAt = agoSecs < 3600
+    ? `${String(Math.floor(agoSecs / 60)).padStart(2, '0')}:${String(agoSecs % 60).padStart(2, '0')} ago`
+    : `${String(Math.floor(agoSecs / 3600)).padStart(2, '0')}:${String(Math.floor((agoSecs % 3600) / 60)).padStart(2, '0')} ago`;
+  const sid = row.signal_id || '';
+  return {
+    id:          sid.length > 14 ? sid.slice(0, 6) + '…' + sid.slice(-4) : sid,
+    fullId:      sid,
+    publisher:   row.publisher,
+    token:       row.token,
+    direction:   row.direction,
+    refPrice:    row.reference_price,
+    targetPrice: row.target_price,
+    stopPrice:   row.stop_price,
+    horizon:     row.horizon_seconds,
+    horizonRemaining,
+    confidence:  row.confidence_bps || 5000,
+    status,
+    capital:     row.capital_deployed_usd || 0,
+    buyers:      0,
+    publishedAt,
+    pnlBps:      row.pnl_bps_net,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // FORMATTERS
@@ -462,9 +380,13 @@ function Topbar({ view, setView }) {
 // ─────────────────────────────────────────────────────────────────────
 // LEADERBOARD VIEW
 // ─────────────────────────────────────────────────────────────────────
-function Leaderboard({ onAgentSelect }) {
-  const [agents, setAgents] = useState(AGENTS);
+function Leaderboard({ agents: agentsProp, onAgentSelect }) {
+  const [agents, setAgents] = useState([]);
   const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (agentsProp && agentsProp.length > 0) setAgents(agentsProp);
+  }, [agentsProp]);
   const [recent, setRecent] = useState(null);
   const [horizon, setHorizon] = useState(847);
 
@@ -662,10 +584,14 @@ function LeaderboardRow({ agent, top, onSelect }) {
 // ─────────────────────────────────────────────────────────────────────
 // AGENT PROFILE
 // ─────────────────────────────────────────────────────────────────────
-function AgentProfile({ agentId, onBack, onBuy }) {
-  const agent = AGENTS.find((a) => a.id === agentId);
-  if (!agent) return null;
-  const signals = SIGNALS.filter((s) => s.publisher === agentId);
+function AgentProfile({ agentId, agents, signals: signalsProp, onBack, onBuy }) {
+  const agent = (agents || []).find((a) => a.id === agentId);
+  if (!agent) return (
+    <div>
+      <button onClick={onBack} className="sf-mono sf-dim" style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', textAlign: 'left', padding: 0, cursor: 'pointer', background: 'none', border: 'none', color: 'var(--sf-fg-dim)' }}>← Return to ledger</button>
+    </div>
+  );
+  const signals = (signalsProp || []).filter((s) => s.publisher === agentId);
 
   return (
     <div style={{ display: 'grid', gap: 32 }}>
@@ -804,9 +730,10 @@ function ROIChart({ data, color }) {
 // ─────────────────────────────────────────────────────────────────────
 // SIGNAL FEED
 // ─────────────────────────────────────────────────────────────────────
-function SignalFeed({ onAgentSelect, onBuy }) {
+function SignalFeed({ agents, signals: signalsProp, onAgentSelect, onBuy }) {
   const [filter, setFilter] = useState('all');
-  const filtered = filter === 'all' ? SIGNALS : SIGNALS.filter((s) => s.status === filter);
+  const allSignals = signalsProp || [];
+  const filtered = filter === 'all' ? allSignals : allSignals.filter((s) => s.status === filter);
 
   return (
     <div style={{ display: 'grid', gap: 24 }}>
@@ -842,7 +769,8 @@ function SignalFeed({ onAgentSelect, onBuy }) {
           ))}
         </div>
         {filtered.map((s) => {
-          const a = AGENTS.find((x) => x.id === s.publisher);
+          const a = (agents || []).find((x) => x.id === s.publisher);
+          if (!a) return null;
           return (
             <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr 1fr 0.6fr', padding: '16px 24px', borderBottom: '1px solid var(--sf-border)', gap: 16, alignItems: 'center' }}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} onClick={() => onAgentSelect(a.id)}>
@@ -896,8 +824,12 @@ function SignalFeed({ onAgentSelect, onBuy }) {
 // ─────────────────────────────────────────────────────────────────────
 // SIGNAL FLOW — the rite
 // ─────────────────────────────────────────────────────────────────────
-function SignalFlow({ onBack, agentId }) {
-  const agent = AGENTS.find((a) => a.id === (agentId || 'reversal'));
+function SignalFlow({ onBack, agentId, agents }) {
+  const agentList = agents || [];
+  const agent = agentList.find((a) => a.id === agentId) || agentList[0] || {
+    sigil: 'reversal', color: '#d4af37', name: 'Oracle', ens: 'oracle.sibyl.eth',
+    rank: 1, reputation: 0, pricePerSignal: 0.50,
+  };
   const sig = {
     id: '0x4e9f3a18b22ec10a',
     shortId: '0x4e9f...c10a',
@@ -948,6 +880,7 @@ function SignalFlow({ onBack, agentId }) {
                 step={st}
                 idx={i}
                 agent={agent}
+                agentCount={agentList.length}
                 state={stage > i ? 'done' : stage === i ? 'active' : 'pending'}
                 isLast={i === stations.length - 1}
               />
@@ -1024,12 +957,12 @@ function SignalFlow({ onBack, agentId }) {
   );
 }
 
-function FlowStation({ step, idx, state, isLast, agent }) {
+function FlowStation({ step, idx, state, isLast, agent, agentCount }) {
   const dotColor = state === 'done' ? 'var(--sf-signal-win)' : state === 'active' ? 'var(--sf-gold-300)' : 'var(--sf-fg-ghost)';
   const ring = state === 'active' ? '0 0 0 4px rgba(212, 175, 55, 0.15), 0 0 24px rgba(212, 175, 55, 0.4)' : 'none';
 
   const details = [
-    `scanning IdentityRegistry · ${AGENTS.length} agents found · sorting by reputation…`,
+    `scanning IdentityRegistry · ${agentCount || '?'} agents found · sorting by reputation…`,
     `HTTP 402 · sending ${agent.pricePerSignal} USDC via x402 facilitator…`,
     'verifying ed25519 signature · stamping 0G Compute attestation…',
     'checking position $1,200 ≤ max $5,000 · slippage 8 bps ≤ cap 25 bps · vol OK · liquidity OK',
@@ -1088,6 +1021,27 @@ function FlowStation({ step, idx, state, isLast, agent }) {
 export default function SibylFiPrototype() {
   const [view, setView] = useState('leaderboard');
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agents, setAgents] = useState([]);
+  const [signals, setSignals] = useState([]);
+
+  useEffect(() => {
+    const loadLeaderboard = () =>
+      sibylfi.leaderboard()
+        .then((entries) =>
+          setAgents((prev) =>
+            entries.map((e, i) => mapAgent(e, i + 1, prev.find((p) => p.id === e.ens_name)?.rank))
+          )
+        )
+        .catch(() => {});
+    const loadSignals = () =>
+      sibylfi.signals()
+        .then((rows) => setSignals(rows.map(mapSignal)))
+        .catch(() => {});
+    loadLeaderboard();
+    loadSignals();
+    const t = setInterval(() => { loadLeaderboard(); loadSignals(); }, 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const goProfile = (id) => { setSelectedAgent(id); setView('profile'); };
   const goFlow = (id) => { setSelectedAgent(id); setView('flow'); };
@@ -1396,10 +1350,10 @@ export default function SibylFiPrototype() {
             setView={(v) => { setView(v); setSelectedAgent(null); }}
           />
           <main className="sf-main">
-            {view === 'leaderboard' && <Leaderboard onAgentSelect={goProfile} />}
-            {view === 'profile' && <AgentProfile agentId={selectedAgent} onBack={goBack} onBuy={goFlow} />}
-            {view === 'flow' && <SignalFlow onBack={goBack} agentId={selectedAgent} />}
-            {view === 'feed' && <SignalFeed onAgentSelect={goProfile} onBuy={goFlow} />}
+            {view === 'leaderboard' && <Leaderboard agents={agents} onAgentSelect={goProfile} />}
+            {view === 'profile' && <AgentProfile agentId={selectedAgent} agents={agents} signals={signals} onBack={goBack} onBuy={goFlow} />}
+            {view === 'flow' && <SignalFlow onBack={goBack} agentId={selectedAgent} agents={agents} />}
+            {view === 'feed' && <SignalFeed agents={agents} signals={signals} onAgentSelect={goProfile} onBuy={goFlow} />}
           </main>
         </div>
       </div>

@@ -1,155 +1,162 @@
-# SibylFi Agents — Doc Structure (v2.0)
+# SibylFi Agents — v2 Status Dashboard
 
-## Estructura final de Research Agents
+Last updated: 2026-05-03.
 
-El sistema soporta **2 perfiles de Research Agents** validados con backtests reales en TradingView:
+## Architecture (v2)
 
-| Perfil | Doc | Pine origen | TF | WR target | Frecuencia |
+```
+Research Agent (swing | scalper)             ← long-only, deterministic strategies
+   │  publishes signed signal (x402-paid)
+   ▼
+Trading Agent
+   │  reads signal → asks Risk → quotes Uniswap → swaps on Base Sepolia
+   ▼
+Risk Agent (profile-aware checks + appetite)  ← v2: 12 checks, 3 appetites
+   │  attests pass/fail
+   ▼
+Trading Agent executes
+   ▼
+Validator Agent
+   │  multi-checkpoint TWAP path-aware outcome resolver
+   │  outcomes: WIN | WIN_PARTIAL | LOSS | EXPIRED | INCONCLUSIVE | INVALID
+   ▼
+ValidatorSettle.sol (Base Sepolia, immutable ledger)
+   │
+   ▼
+ERC-8004 ReputationRegistry (Sepolia)
+```
+
+## Research Agents — 2 profiles
+
+| Profile | ENS | Strategy | TF | Horizon | Confidence cap |
 |---|---|---|---|---|---|
-| **Swing** | `agent-research-swing.md` | Cartagena LONG PRO Trend Hunter | 4H–1D | 60-80% | 5-15/mes |
-| **Scalper** | `agent-research-scalper.md` | Cartagena SibylFi LONG Adaptive v4 | 1m–5m | 50-55% | 80-150/mes |
+| **Swing** | `swing.sibyl.eth` | Murphy + Dow + Elder, 5-confluence strict | 4H–1D | 1d–5d | 9000 bps |
+| **Scalper** | `scalper.sibyl.eth` | Adaptive ML (4 setups), anti-DD, multi-asset filter | 1m–5m | 30min–1h | 8500 bps |
 
-## Archivos a actualizar en GitHub
+Both **long-only** (schema-enforced). LLM is now a *calibrator* only — it nudges confidence within `[base, cap]` and writes the thesis. The strategy decides direction and base levels deterministically.
 
-### En `/agents/` (raíz)
+## Multi-tenant agent registry
 
-| Archivo | Acción | Notas |
-|---|---|---|
-| `agent-research-swing.md` | **NUEVO** ✓ | Reemplaza meanrev (semánticamente diferente, mejor base teórica) |
-| `agent-research-scalper.md` | **NUEVO** ✓ | Reemplaza momentum (mismo perfil, mejor implementación) |
-| `agent-research-meanrev.md` | **ELIMINAR** | Reemplazado por swing |
-| `agent-research-momentum.md` | **ELIMINAR** | Reemplazado por scalper |
-| `agent-research-news.md` | **ELIMINAR** | No hay Pine que lo respalde |
-| `agent-risk.md` | **ACTUALIZAR** | Soporta perfil swing+scalper |
-| `agent-validator.md` | **ACTUALIZAR** | Soporta WIN_PARTIAL + multi-TP |
-| `agent-trading.md` | **ACTUALIZAR** | Portfolio dual swing+scalper |
+Users register custom strategy bundles via `POST /api/agents` (frontend has the form). Each registration:
+- Auto-generates a fresh demo wallet (eth_account)
+- Stores `(profile, params, appetite, token, price)` in Postgres `custom_agents` table
+- Exposes a per-agent `POST /api/agents/{id}/publish-signal` that runs the strategy in-process
 
-### En `/specs/` (si existe esta carpeta)
+Endpoint summary:
 
-| Archivo | Acción |
-|---|---|
-| `signal-validator.md` | **ACTUALIZAR a v2.0** (TWAP por perfil + WIN_PARTIAL) |
-| `reputation-math.md` | **ACTUALIZAR a v2.0** (significance threshold por perfil) |
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/agents/_defaults/swing` | Default `SwingParams` for the form |
+| `GET /api/agents/_defaults/scalper` | Default `ScalperParams` for the form |
+| `POST /api/agents` | Register a new agent |
+| `GET /api/agents` | List all custom agents |
+| `GET /api/agents/{id}` | One record |
+| `DELETE /api/agents/{id}` | Remove |
+| `POST /api/agents/{id}/publish-signal` | Run the strategy; returns `published` + signal or `no_signal` + reason |
+| `POST /demo/one-click-flow` | Seed `demo/seeds.json` agents + walk full lifecycle |
 
-## Cambios clave v1 → v2
+## v1 → v2 changes
 
-### Schema de señales
+### Schema (`agents/shared/signal_schema.py`)
 
-**v1 (legacy):**
-```json
-{
-  "target_price": 3502.00,
-  "stop_price": 3432.96,
-  "horizon_seconds": 86400,
-  "confidence_bps": 8500
-}
-```
+| Field | v1 | v2 |
+|-------|----|----|
+| `direction` | `Literal["long","short"]` | **`Literal["long"]`** (short rejected) |
+| `horizon_seconds` | 60–86400 | **300 – 1_209_600** (5min – 14d, covers Scalper 1m + Position roadmap) |
+| `metadata` | absent | **`dict[str, Any] \| None`** (carries tp1, setup, tf, confluence, etc.) |
 
-**v2 — Scalper (single TP):**
-```json
-{
-  "target_price": 3484.92,
-  "stop_price": 3432.96,
-  "horizon_seconds": 1800,
-  "metadata": { "setup": "Pullback", "tf": "5m" }
-}
-```
-
-**v2 — Swing (multi-TP):**
-```json
-{
-  "target_price": 3502.00,
-  "stop_price": 3432.96,
-  "horizon_seconds": 86400,
-  "metadata": {
-    "tp1": 3484.92,
-    "be_trigger_pct": 1.5,
-    "rr_structure": "2:1 / 3:1 multi-TP"
-  }
-}
-```
-
-### Outcome Enum (Validator)
+### Outcome enum (`Outcome`)
 
 | Outcome | v1 | v2 |
-|---|---|---|
-| WIN | ✓ | ✓ |
-| **WIN_PARTIAL** | — | **NUEVO** (TP1 hit + stop después) |
-| LOSS | ✓ | ✓ |
-| EXPIRED | ✓ | ✓ |
-| INCONCLUSIVE | ✓ | ✓ |
-| INVALID | ✓ | ✓ |
+|---------|----|----|
+| `WIN`, `LOSS`, `EXPIRED`, `PENDING` | ✓ | ✓ |
+| **`WIN_PARTIAL`** | — | TP1 hit + stop hit afterwards (multi-TP swing) |
+| **`INCONCLUSIVE`** | — | oracle gap (not the agent's fault — reputation muted) |
+| **`INVALID`** | — | reference-price mismatch / fraud-grade |
 
-### TWAP Windows (Validator)
+### Risk Agent
 
-| | v1 | v2 Swing | v2 Scalper |
-|---|---|---|---|
-| reference_price window | 1800s | 1800s | **600s** |
-| settlement window | 1800s | 1800s | **600s** |
-| checkpoint interval | 60s | 60s | **15s** |
-| spot/twap deviation max | 3% | 3% | **1.5%** |
+12 checks (`agents/risk/checks.py`): `POSITION_SIZE`, `RR_INSUFFICIENT`, `STOP_TOO_WIDE`, `SLIPPAGE`, `LIQUIDITY`, `EXHAUSTION`, `TWAP_DEVIATION`, `STOP_TOO_CLOSE`, `SELF_PURCHASE`, `ELDER_MONTH_RULE`, `MULTI_TP_INVALID`, `NON_LONG_REJECTED`. Profile-aware (swing/scalper/intraday floors) × appetite layer (conservative ~20% tighter / balanced identity / aggressive ~20% looser).
 
-### Reputation (Math)
+### Validator Agent
 
-| | v1 | v2 |
-|---|---|---|
-| Outcomes en cálculo | 5 | **6 (incluye WIN_PARTIAL)** |
-| Significance threshold | 10 fijo | **10 swing / 30 scalper** |
-| Brier WIN_PARTIAL value | — | **0.5 (intermedio)** |
+Multi-checkpoint TWAP outcome resolver (`agents/validator/algorithm.py`). `Checkpoint(price, t)` list replaces the v1 single-TWAP-at-horizon. Path-aware: detects which level was hit first.
 
-### Risk Agent — Thresholds por perfil
+```python
+hit_target = first checkpoint with price ≥ target
+hit_stop   = first checkpoint with price ≤ stop
+hit_tp1    = first checkpoint with price ≥ tp1   (if metadata.tp1 present)
 
-| Threshold | Swing | Scalper |
-|---|---|---|
-| Stop max | 1.0% | 1.0% |
-| R:R mínimo | 2.5 | 2.0 |
-| Slippage max | 1.5% | **0.8%** |
-| Spot/TWAP deviation max | 3.0% | **1.5%** |
+if hit_target before hit_stop      → WIN
+if hit_tp1 before hit_stop         → WIN_PARTIAL  (PnL computed against tp1, not horizon)
+if hit_stop                        → LOSS
+if no checkpoints                  → INCONCLUSIVE
+otherwise                          → EXPIRED
+```
 
-### Trading Agent — Portfolio Dual
+`reputation_update()` adds a half-credit branch for `WIN_PARTIAL` and a short-circuit for `INCONCLUSIVE`.
 
-| | Swing | Scalper |
-|---|---|---|
-| Capital allocation | 60% | 40% |
-| Max positions abiertas | 3 | 5 |
-| Max position size | $60 | $25 |
-| Loop check interval | 5 min | 30 sec |
-| Cycle budget máx | 0.5% capital | 0.1% capital |
+### Indicator math
 
-## Commit messages sugeridos
+Pure-Python ports in `agents/shared/strategies/indicators.py`. Wilder smoothing for RSI/ATR, Pine `ta.ema` semantics (alpha=2/(n+1)), population stdev for Bollinger. No third-party TA dependency — required for the deterministic mock-replay path.
+
+Functions: `sma`, `ema`, `rsi`, `atr`, `bollinger`, `donchian`, `supertrend`, `vwap_session`, `volume_zscore`, `floor_pivots`, `detect_pivots_high/low`, `divergence_regular_bull/hidden_bull/regular_bear/hidden_bear`, `dow_bull_bars`.
+
+### Strategy modules
+
+`agents/shared/strategies/`:
+- `snapshot.py` — `SwingFeatures`, `ScalperFeatures`, `StrategyResult`, `SwingParams`, `ScalperParams`
+- `swing.py:24` — `evaluate_swing()` enforces 5-confluence + R3 cap + Brier-anchored confidence
+- `scalper.py:30` — `evaluate_scalper()` enforces anti-DD + multi-asset filter + adaptive ML pick
+- `feature_provider.py` — MOCK_MODE-aware snapshot loader (real OHLCV pipeline lands in v2.5)
+
+## Test surface
+
+Run inside the trading-agent (or any agent) container:
 
 ```bash
-# Commit 1: Reemplazar Research Agents legacy
-git rm agents/agent-research-meanrev.md
-git rm agents/agent-research-momentum.md
-git rm agents/agent-research-news.md
-git add agents/agent-research-swing.md
-git add agents/agent-research-scalper.md
-git commit -m "docs(agents): replace legacy research agents with validated swing+scalper profiles
-
-- agent-research-swing.md based on Cartagena LONG PRO Trend Hunter Pine (4H-1D)
-- agent-research-scalper.md based on Cartagena SibylFi Adaptive v4 Pine (1m-5m)
-- Both backtested in TradingView with real metrics
-- Long-only design aligned with Uniswap Trading API constraints"
-
-# Commit 2: Actualizar agentes infraestructura
-git add agents/agent-risk.md
-git add agents/agent-validator.md
-git add agents/agent-trading.md
-git commit -m "docs(agents): update Risk/Validator/Trading agents to v2 with profile-aware logic
-
-- Risk Agent: thresholds differentiated by profile (swing/scalper)
-- Validator Agent: WIN_PARTIAL outcome for multi-TP swing signals
-- Trading Agent: dual portfolio allocation (60% swing / 40% scalper)
-- Validator TWAP windows scaled by profile (1800s swing / 600s scalper)"
-
-# Commit 3: Specs
-git add specs/signal-validator.md
-git add specs/reputation-math.md
-git commit -m "docs(specs): update validator + reputation math to v2.0 with profile support
-
-- TWAP windows by profile
-- WIN_PARTIAL outcome with weighted Brier (actual=0.5)
-- Significance threshold differentiated (10 swing / 30 scalper)
-- Multi-TP settlement logic with BE detection"
+docker exec trading-agent python -m pytest \
+  agents/shared/test_signal_schema.py \
+  agents/risk/test_checks.py \
+  agents/validator/test_algorithm.py \
+  agents/shared/strategies/ \
+  agents/shared/test_base_research_agent.py \
+  orchestrator/test_custom_agents.py -q
 ```
+
+103+ tests across schema, risk, validator, indicators, swing/scalper strategies, base agent, and the multi-tenant registry helpers.
+
+## Demo flow
+
+Hit `POST /demo/one-click-flow` (or click the demo button in the frontend). The orchestrator:
+
+1. Loads `demo/seeds.json` (3 pre-baked agents)
+2. Registers each into the multi-tenant registry (idempotent — reuses existing rows)
+3. Publishes a signal from each
+4. Runs one trading-agent `/trade` pass
+5. Runs one validator `/settle-now` pass
+6. Returns a structured trace with timings
+
+Expected per the seeds:
+- `trend-hunter.sibyl.eth` (swing) — **published**, setup `strict_5_confluence`, horizon 1d
+- `pulse-scalper.sibyl.eth` (scalper) — **published**, setup `Pullback`, horizon 1h
+- `patient-sage.sibyl.eth` (swing, conservative) — **no_signal** with reason `dow_streak_too_short:22<30` (showcases the rejection path)
+
+## Security posture
+
+After the May 2026 incident:
+- All agent ports (`7100`–`7106`) bound to `127.0.0.1` only — internet-facing surface is `:80/:443` (Caddy) plus SSH
+- Frontend container does NOT load `.env` — it only sees `NEXT_PUBLIC_ORCHESTRATOR_URL`
+- Frontend image runs Next.js `^15.2.4` (locked above CVE-2025-29927 patch boundary)
+- Caddy routes `/signal/swing/*` and `/signal/scalper/*` only (legacy routes removed)
+
+## Status
+
+| Track | Status |
+|-------|--------|
+| Schema, risk, validator, base agent, indicators, strategies | ✅ green |
+| Multi-tenant registry + frontend AgentForm | ✅ green |
+| Demo seed configs + one-click flow | ✅ green |
+| Real OHLCV→features pipeline (replaces `mock_features.json`) | 🟡 v2.5 |
+| Real x402 payment flow on signal access | 🟡 v2.5 |
+| Real Uniswap V3 TWAP read in `read_checkpoints` | 🟡 v2.5 |

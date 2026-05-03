@@ -29,7 +29,8 @@ def sign_signal(signal: Signal, priv_key: str) -> str:
     digest = Web3.keccak(canonical)
     msg = encode_defunct(digest)
     signed = Account.sign_message(msg, private_key=priv_key)
-    return signed.signature.hex()
+    h = signed.signature.hex()
+    return h if h.startswith("0x") else "0x" + h
 
 
 def verify_signal(signal: Signal, expected_signer: str) -> bool:
@@ -55,4 +56,5 @@ def sign_risk_attestation(attestation: RiskAttestation, priv_key: str) -> str:
     digest = Web3.keccak(canonical)
     msg = encode_defunct(digest)
     signed = Account.sign_message(msg, private_key=priv_key)
-    return signed.signature.hex()
+    h = signed.signature.hex()
+    return h if h.startswith("0x") else "0x" + h

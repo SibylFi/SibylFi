@@ -60,11 +60,17 @@ async def fetch_paywalled(
     settings = get_settings()
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # First shot — expect 402
+        # First shot — expect 402 (payment required) or 204 (no signal this bar)
         first = await client.request(method, url, json=json_body)
         if first.status_code == 200:
-            log.warning("x402_unexpected_200_no_payment", url=url)
+            # Paywall middleware let it through — return what we got
+            log.info("x402_first_shot_200_no_charge", url=url)
             return PaidResponse(body=first.json(), payment_token="")
+
+        if first.status_code == 204:
+            # Research agent produced no signal — nothing to buy, no charge
+            log.info("x402_no_signal_this_bar", url=url)
+            return PaidResponse(body=None, payment_token="")
 
         if first.status_code != 402:
             raise RuntimeError(f"unexpected status {first.status_code}: {first.text}")
@@ -93,6 +99,10 @@ async def fetch_paywalled(
             payment_header = _mock_x402_header(
                 payer=payer_addr, payment=payment
             )
+        elif settings.X402_DEMO_TOKEN:
+            # Demo mode: use the configured bypass token so the full pipeline
+            # runs without a live CDP subscription.
+            payment_header = settings.X402_DEMO_TOKEN
         else:
             payment_header = await _real_x402_header(
                 payer_priv_key=payer_priv_key, payment=payment
@@ -104,6 +114,9 @@ async def fetch_paywalled(
             json=json_body,
             headers={"X-PAYMENT": payment_header},
         )
+        if second.status_code == 204:
+            # Research agent accepted payment but produced no signal this bar.
+            return PaidResponse(body=None, payment_token=payment_header)
         if second.status_code != 200:
             raise RuntimeError(
                 f"paid request failed: {second.status_code} {second.text}"

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # x402
     COINBASE_CDP_KEY: str = "MOCK_CDP_KEY"
     X402_FACILITATOR_URL: str = "https://facilitator.cdp.coinbase.com"
+    # When set, requests carrying this token bypass the CDP facilitator call so
+    # the demo can run without a live x402 subscription.  Leave empty in prod.
+    X402_DEMO_TOKEN: str = "demo-mock-token"
 
     # Inference
     ANTHROPIC_API_KEY: str = "MOCK_ANTHROPIC_KEY"
