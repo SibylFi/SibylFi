@@ -53,7 +53,7 @@ Profile = Literal["swing", "scalper"]
 class PersonaConfig:
     name: str                                # short id, e.g. "swing"
     profile: Profile                         # which strategy to run
-    ens_name: str                            # e.g. "swing.sibyl.eth"
+    ens_name: str                            # e.g. "swing.sibylfi.eth"
     private_key: str
     price_per_signal_usdc: float
     prompt_template: str                     # for the LLM calibrator
@@ -141,7 +141,14 @@ class BaseResearchAgent:
         token: str,
         result: StrategyResult,
     ) -> tuple[int, str, str]:
-        """Returns (confidence_delta_bps, thesis, backend)."""
+        """Returns (confidence_delta_bps, thesis, backend).
+
+        The LLM is advisory: the strategy already decided direction and base
+        confidence. If every inference backend errors (401 from Anthropic, 0G
+        offline, etc.), we ship the signal with delta=0 + a generic thesis
+        rather than 500ing — the buyer already paid x402 and is owed the
+        signal the strategy approved.
+        """
         prompt = self.persona.prompt_template.format(
             token=token,
             profile=self.persona.profile,
@@ -153,9 +160,21 @@ class BaseResearchAgent:
             stop_price=result.stop_price,
             horizon_seconds=result.horizon_seconds,
         )
-        out = await infer(prompt, persona=self.persona.name, max_tokens=256)
-        delta, thesis = _parse_calibration(out.text)
-        return delta, thesis, out.backend
+        try:
+            out = await infer(prompt, persona=self.persona.name, max_tokens=256)
+            delta, thesis = _parse_calibration(out.text)
+            return delta, thesis, out.backend
+        except Exception as e:
+            log.warning(
+                "calibrator_unavailable_using_neutral_delta",
+                persona=self.persona.name,
+                error=str(e)[:200],
+            )
+            thesis = (
+                f"calibrator unavailable; shipping {result.setup} signal with "
+                "strategy base confidence and zero delta"
+            )
+            return 0, thesis, "uncalibrated"
 
     # ── Signal construction ──────────────────────────────────────────────
 
