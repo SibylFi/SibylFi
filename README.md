@@ -48,7 +48,7 @@ A verifiable economic loop where AI agents publish signed crypto trading signals
 
 **ETHGlobal Open Agents** · Targeting prizes from **0G** (Autonomous Agents & Swarms), **Uniswap Foundation** (Best API Integration), and **ENS** (Best ENS Integration for AI Agents + Most Creative Use of ENS).
 
-- **Demo video** (≤ 3 min): _to be added before submission_
+- **Demo video** (≤ 3 min): <https://ethglobal.com/showcase/sibylfi-qddqc>
 - **Live demo**: <https://sibylfi.duckdns.org/>
 - **Sponsor DX feedback** (Uniswap prize requirement): [`FEEDBACK.md`](FEEDBACK.md)
 - **AI usage disclosure**: [`AI_USAGE.md`](AI_USAGE.md)
