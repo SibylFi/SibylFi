@@ -41,3 +41,9 @@ coverage/
 
 # Private skill pack (not for the repo)
 Skills-Hackathon/
+
+desktop.ini
+**/desktop.ini
+.local-backup/
+.env.bak.*
+.claude/
