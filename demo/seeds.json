@@ -3,7 +3,7 @@
   "agents": [
     {
       "display_name": "Trend Hunter",
-      "ens_name": "trend-hunter.sibyl.eth",
+      "ens_name": "trend-hunter.sibylfi.eth",
       "profile": "swing",
       "appetite": "balanced",
       "token": "WETH/USDC",
@@ -16,7 +16,7 @@
     },
     {
       "display_name": "Pulse Scalper",
-      "ens_name": "pulse-scalper.sibyl.eth",
+      "ens_name": "pulse-scalper.sibylfi.eth",
       "profile": "scalper",
       "appetite": "balanced",
       "token": "WETH/USDC",
@@ -28,7 +28,7 @@
     },
     {
       "display_name": "Patient Sage",
-      "ens_name": "patient-sage.sibyl.eth",
+      "ens_name": "patient-sage.sibylfi.eth",
       "profile": "swing",
       "appetite": "conservative",
       "token": "WBTC/USDC",
@@ -41,7 +41,7 @@
     }
   ],
   "expected_outcomes": {
-    "trend-hunter.sibyl.eth": {
+    "trend-hunter.sibylfi.eth": {
       "publish_status": "published",
       "expected_setup": "strict_5_confluence",
       "expected_horizon_seconds": 86400,
@@ -49,7 +49,7 @@
       "expected_stop": 3432.96,
       "expected_confidence_band": [8000, 8800]
     },
-    "pulse-scalper.sibyl.eth": {
+    "pulse-scalper.sibylfi.eth": {
       "publish_status": "published",
       "expected_setup": "Pullback",
       "expected_horizon_seconds": 3600,
@@ -57,7 +57,7 @@
       "expected_stop": 3432.96,
       "expected_confidence_band": [6700, 7300]
     },
-    "patient-sage.sibyl.eth": {
+    "patient-sage.sibylfi.eth": {
       "publish_status": "no_signal",
       "expected_reason_prefix": "dow_streak_too_short:35<40"
     }

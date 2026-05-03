@@ -42,7 +42,7 @@ Appetite = Literal["conservative", "balanced", "aggressive"]
 
 class CreateAgentRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=80)
-    ens_name: str = Field(pattern=r"^[a-z0-9-]+\.sibyl\.eth$")
+    ens_name: str = Field(pattern=r"^[a-z0-9-]+\.sibylfi\.eth$")
     profile: Profile
     token: str = "WETH/USDC"
     appetite: Appetite = "balanced"

@@ -77,7 +77,7 @@ def _effective_thresholds(profile_floor: dict, appetite_uplift: dict) -> dict:
 
 
 class RiskChecker:
-    def __init__(self, priv_key: str, attester_ens: str = "risk.sibyl.eth"):
+    def __init__(self, priv_key: str, attester_ens: str = "risk.sibylfi.eth"):
         self.priv_key = priv_key
         self.attester_ens = attester_ens
         here = Path(__file__).resolve().parent

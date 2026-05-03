@@ -69,7 +69,7 @@ def test_default_params_scalper_serializable():
 def test_persona_from_row_swing_roundtrip():
     row = {
         "id": 1,
-        "ens_name": "alpha-one.sibyl.eth",
+        "ens_name": "alpha-one.sibylfi.eth",
         "display_name": "Alpha One",
         "profile": "swing",
         "appetite": "balanced",
@@ -82,7 +82,7 @@ def test_persona_from_row_swing_roundtrip():
     }
     persona = _persona_from_row(row)
     assert persona.profile == "swing"
-    assert persona.ens_name == "alpha-one.sibyl.eth"
+    assert persona.ens_name == "alpha-one.sibylfi.eth"
     assert persona.swing_params is not None
     assert persona.swing_params.min_dow_bars == 18
     assert persona.scalper_params is None
@@ -91,7 +91,7 @@ def test_persona_from_row_swing_roundtrip():
 def test_persona_from_row_scalper_roundtrip():
     row = {
         "id": 2,
-        "ens_name": "fast-fox.sibyl.eth",
+        "ens_name": "fast-fox.sibylfi.eth",
         "display_name": "Fast Fox",
         "profile": "scalper",
         "appetite": "aggressive",

@@ -40,7 +40,7 @@ def _mk_signal(
 ) -> Signal:
     sig = Signal(
         signal_id="0x" + "ab" * 32,
-        publisher="swing.sibyl.eth",
+        publisher="swing.sibylfi.eth",
         token="eip155:84532/erc20:0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
         direction="long",  # always long via schema; mutate after if needed
         entry_condition=EntryCondition(reference_price=ref),

@@ -25,7 +25,7 @@ from agents.validator.algorithm import (
 def make_signal(ref=100.0, target=102.0, stop=99.0, horizon=3600, metadata=None):
     return Signal(
         signal_id="0x" + "ab" * 32,
-        publisher="swing.sibyl.eth",
+        publisher="swing.sibylfi.eth",
         token="eip155:84532/erc20:0xWETH",
         direction="long",
         entry_condition=EntryCondition(type="market_at_publication", reference_price=ref),
