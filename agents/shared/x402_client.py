@@ -1,24 +1,31 @@
 """
 x402 client for the Trading Agent.
 
-Per the x402-and-uniswap skill, the Python `pip install x402` package is alpha
-and post-cutoff for most models. We use httpx + a hand-rolled signature flow
-in MOCK_MODE, and shell out to a Node helper for real x402 transactions.
+Real-mode flow (MOCK_MODE=0, FORCE_X402_DEMO=0):
+  1. GET/POST resource → server returns 402 + paymentRequirements
+  2. Build EIP-3009 transferWithAuthorization typed-data payload
+  3. Sign with payer's private key (eth_account.sign_typed_data)
+  4. base64url-encode {x402Version, scheme, network, payload}
+  5. Repeat the request with X-PAYMENT header — server verifies + settles
+     against the public facilitator (https://facilitator.x402.rs by default),
+     which broadcasts the USDC transfer to base-sepolia.
 
-In MOCK_MODE, payments are simulated — the X-PAYMENT header is a JWT-style
-token containing payer/recipient/amount, and the server middleware accepts
-any non-empty header. This is enough for end-to-end pipeline testing.
+In MOCK_MODE the X-PAYMENT header is a tiny base64'd JSON the mock middleware
+accepts unconditionally — enough for offline end-to-end tests.
 """
 from __future__ import annotations
 
 import base64
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
 import structlog
+from eth_account import Account
+from eth_account.messages import encode_typed_data
 
 from .settings import get_settings
 
@@ -31,6 +38,7 @@ class PaymentDetails:
     amount: str
     pay_to: str
     network: str
+    extra: dict             # USDC EIP-712 domain hints: {"name", "version"}
 
 
 @dataclass
@@ -50,25 +58,19 @@ async def fetch_paywalled(
     max_pay_usdc: float = 5.0,
 ) -> PaidResponse:
     """
-    Two-shot x402 fetch: first request gets 402 with payment details, second
-    request includes the X-PAYMENT header.
-
-    In MOCK_MODE, the X-PAYMENT header is a base64'd JSON blob the mock
-    middleware accepts. In real mode, this would shell out to a Node helper
-    around `@coinbase/x402-fetch`.
+    Two-shot x402 fetch. The first request gets either a 402 with payment
+    details, a 200 (the server let it through), or a 204 (the upstream produced
+    no content this bar). On 402, build a signed X-PAYMENT header and replay.
     """
     settings = get_settings()
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        # First shot — expect 402 (payment required) or 204 (no signal this bar)
+    async with httpx.AsyncClient(timeout=20.0) as client:
         first = await client.request(method, url, json=json_body)
         if first.status_code == 200:
-            # Paywall middleware let it through — return what we got
             log.info("x402_first_shot_200_no_charge", url=url)
             return PaidResponse(body=first.json(), payment_token="")
 
         if first.status_code == 204:
-            # Research agent produced no signal — nothing to buy, no charge
             log.info("x402_no_signal_this_bar", url=url)
             return PaidResponse(body=None, payment_token="")
 
@@ -80,56 +82,50 @@ async def fetch_paywalled(
         if not accepts:
             raise RuntimeError("402 response has no `accepts` array")
 
+        # Take the first acceptable requirement we can satisfy. For SibylFi
+        # all paid endpoints announce a single base-sepolia/USDC requirement.
         accept = accepts[0]
-        amount_required = int(accept["max_amount_required"]) / 1_000_000  # USDC has 6 decimals
+        amount_required = int(accept["maxAmountRequired"]) / 1_000_000
         if amount_required > max_pay_usdc:
-            raise RuntimeError(
-                f"price ${amount_required} exceeds max ${max_pay_usdc}"
-            )
+            raise RuntimeError(f"price ${amount_required} exceeds max ${max_pay_usdc}")
 
         payment = PaymentDetails(
             asset=accept["asset"],
-            amount=accept["max_amount_required"],
-            pay_to=accept["pay_to"],
+            amount=accept["maxAmountRequired"],
+            pay_to=accept["payTo"],
             network=accept["network"],
+            extra=accept.get("extra") or {},
         )
 
-        # Build the X-PAYMENT header
+        # Build the X-PAYMENT header.
         if settings.MOCK_MODE:
-            payment_header = _mock_x402_header(
-                payer=payer_addr, payment=payment
-            )
-        elif settings.X402_DEMO_TOKEN:
-            # Demo mode: use the configured bypass token so the full pipeline
-            # runs without a live CDP subscription.
+            payment_header = _mock_x402_header(payer=payer_addr, payment=payment)
+        elif settings.FORCE_X402_DEMO and settings.X402_DEMO_TOKEN:
+            # Explicit demo bypass — useful when running against real RPC but
+            # without a faucet-funded payer wallet.
             payment_header = settings.X402_DEMO_TOKEN
         else:
-            payment_header = await _real_x402_header(
-                payer_priv_key=payer_priv_key, payment=payment
+            payment_header = _build_real_header(
+                payer_addr=payer_addr,
+                payer_priv_key=payer_priv_key,
+                payment=payment,
             )
 
-        # Second shot — with payment
         second = await client.request(
             method, url,
             json=json_body,
             headers={"X-PAYMENT": payment_header},
         )
         if second.status_code == 204:
-            # Research agent accepted payment but produced no signal this bar.
             return PaidResponse(body=None, payment_token=payment_header)
         if second.status_code != 200:
-            raise RuntimeError(
-                f"paid request failed: {second.status_code} {second.text}"
-            )
+            raise RuntimeError(f"paid request failed: {second.status_code} {second.text}")
 
         return PaidResponse(body=second.json(), payment_token=payment_header)
 
 
 def _mock_x402_header(payer: str, payment: PaymentDetails) -> str:
-    """
-    Mock X-PAYMENT token: base64url JSON. Real x402 uses EIP-3009 transferWithAuthorization
-    or a permit flow; we simulate just enough for end-to-end testing.
-    """
+    """Tiny base64'd token the mock middleware accepts for offline runs."""
     blob = {
         "v": 1,
         "scheme": "exact",
@@ -147,17 +143,97 @@ def _mock_x402_header(payer: str, payment: PaymentDetails) -> str:
     return f"mock.{encoded}"
 
 
-async def _real_x402_header(payer_priv_key: str, payment: PaymentDetails) -> str:
-    """
-    Real x402 flow: sign EIP-3009 transferWithAuthorization OR call Node helper
-    around @coinbase/x402-fetch.
+def _network_to_chain_id(network: str) -> int:
+    """Map x402 network identifier to its EIP-155 chain ID."""
+    mapping = {
+        "base-sepolia": 84532,
+        "base":         8453,
+        "ethereum":     1,
+        "sepolia":      11155111,
+    }
+    if network not in mapping:
+        raise ValueError(f"unknown x402 network {network!r}")
+    return mapping[network]
 
-    For the reference repo we leave this as a placeholder — the recommended
-    approach (per the x402-and-uniswap skill) is to shell out to a tiny Node
-    script. See tools/x402-client.js (not included in this scaffold).
+
+def _build_real_header(payer_addr: str, payer_priv_key: str, payment: PaymentDetails) -> str:
     """
-    raise NotImplementedError(
-        "real-mode x402 not implemented in reference scaffold; "
-        "set MOCK_MODE=1 or implement Node helper. See "
-        ".claude/skills/x402-and-uniswap/SKILL.md for the recommended pattern."
+    Sign EIP-3009 transferWithAuthorization for the USDC contract on the target
+    network, then assemble the canonical x402 v1 X-PAYMENT header.
+    """
+    chain_id = _network_to_chain_id(payment.network)
+    name = payment.extra.get("name", "USD Coin")
+    version = payment.extra.get("version", "2")
+
+    now = int(time.time())
+    valid_after = 0
+    valid_before = now + 600           # 10-minute window
+    nonce = "0x" + secrets.token_hex(32)
+
+    # Canonical EIP-712 typed data for USDC's transferWithAuthorization.
+    typed_data = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name",              "type": "string"},
+                {"name": "version",           "type": "string"},
+                {"name": "chainId",           "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "TransferWithAuthorization": [
+                {"name": "from",         "type": "address"},
+                {"name": "to",           "type": "address"},
+                {"name": "value",        "type": "uint256"},
+                {"name": "validAfter",   "type": "uint256"},
+                {"name": "validBefore",  "type": "uint256"},
+                {"name": "nonce",        "type": "bytes32"},
+            ],
+        },
+        "primaryType": "TransferWithAuthorization",
+        "domain": {
+            "name":              name,
+            "version":           version,
+            "chainId":           chain_id,
+            "verifyingContract": payment.asset,
+        },
+        "message": {
+            "from":        payer_addr,
+            "to":          payment.pay_to,
+            "value":       int(payment.amount),
+            "validAfter":  valid_after,
+            "validBefore": valid_before,
+            "nonce":       nonce,
+        },
+    }
+
+    signable = encode_typed_data(full_message=typed_data)
+    signed = Account.sign_message(signable, private_key=payer_priv_key)
+    signature = "0x" + signed.signature.hex() if not signed.signature.hex().startswith("0x") else signed.signature.hex()
+
+    payload = {
+        "x402Version": 1,
+        "scheme":      "exact",
+        "network":     payment.network,
+        "payload": {
+            "signature": signature,
+            "authorization": {
+                "from":        payer_addr,
+                "to":          payment.pay_to,
+                "value":       payment.amount,
+                "validAfter":  str(valid_after),
+                "validBefore": str(valid_before),
+                "nonce":       nonce,
+            },
+        },
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+    log.info(
+        "x402_real_header_built",
+        payer=payer_addr,
+        pay_to=payment.pay_to,
+        amount_usdc=int(payment.amount) / 1_000_000,
+        valid_before=valid_before,
     )
+    return encoded

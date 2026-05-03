@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from .base_research_agent import BaseResearchAgent, PersonaConfig
 from .db import close_pool, init_pool
 from .logging_setup import setup_logging
-from .x402_middleware import PriceConfig, require_payment
+from .x402_middleware import PriceConfig, install_x402_handlers, require_payment
 
 
 def build_research_app(persona: PersonaConfig) -> FastAPI:
@@ -31,6 +31,7 @@ def build_research_app(persona: PersonaConfig) -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
+    install_x402_handlers(app)
     agent = BaseResearchAgent(persona)
 
     price = PriceConfig(
