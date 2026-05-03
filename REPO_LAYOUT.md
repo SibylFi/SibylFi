@@ -56,8 +56,8 @@ agents/
 │       ├── erc8004_data.json                 — 2 pre-registered v2 agents
 │       └── twap_fixtures.json                — synthetic prices for validator tests
 │
-├── research_swing/main.py                    — "swing.sibyl.eth" — 4H/1D Murphy+Dow+Elder
-├── research_scalper/main.py                  — "scalper.sibyl.eth" — 1m/5m adaptive multi-setup
+├── research_swing/main.py                    — "swing.sibylfi.eth" — 4H/1D Murphy+Dow+Elder
+├── research_scalper/main.py                  — "scalper.sibylfi.eth" — 1m/5m adaptive multi-setup
 │
 ├── trading/
 │   ├── uniswap.py                            — Uniswap Trading API wrapper (with required headers)

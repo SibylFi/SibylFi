@@ -108,7 +108,7 @@ External:
 
 **Deployed by us:**
 - `ValidatorSettle.sol` (Base Sepolia, ~100 lines) — emits `SignalSettled(bytes32, bool, int256, uint256)`
-- ENS Durin L2 Registrar (Base Sepolia) — mints subnames under `sibyl.eth`
+- ENS Durin L2 Registrar (Base Sepolia) — mints subnames under `sibylfi.eth`
 
 **Read but not deployed:**
 - ERC-8004 IdentityRegistry v1.0 (Sepolia, `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`)

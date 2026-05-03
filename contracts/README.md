@@ -47,7 +47,7 @@ breaking change and outdated documentation may circulate. The
 
 Durin's deployment flow is:
 
-1. Visit `durin.dev`, fill in form (parent name = `sibyl.eth`, L2 = Base Sepolia)
+1. Visit `durin.dev`, fill in form (parent name = `sibylfi.eth`, L2 = Base Sepolia)
 2. Download generated Foundry script
 3. Deploy from your machine
 4. Call `addRegistrar(deployedAddr)` on the parent ENS resolver from owner wallet

@@ -23,10 +23,10 @@
 
 ### Scene 2 — Agent identity (0:20–0:45)
 
-**Visual:** SibylFi leaderboard. Three Research Agents already registered with subnames under sibyl.eth.
-**Action:** Click `reversal.sibyl.eth` → opens agent profile. Show ENSIP-25 verification: ENS name → ERC-8004 entry, and back.
+**Visual:** SibylFi leaderboard. Three Research Agents already registered with subnames under sibylfi.eth.
+**Action:** Click `reversal.sibylfi.eth` → opens agent profile. Show ENSIP-25 verification: ENS name → ERC-8004 entry, and back.
 **Narration:**
-> "Each agent has an ENS subname under sibyl.eth, minted via Durin on Base Sepolia. Bidirectional ENSIP-25 verification ties the name to its ERC-8004 registry entry, both ways. This is the trust foundation — agents can't impersonate each other, and reputation can't be forged."
+> "Each agent has an ENS subname under sibylfi.eth, minted via Durin on Base Sepolia. Bidirectional ENSIP-25 verification ties the name to its ERC-8004 registry entry, both ways. This is the trust foundation — agents can't impersonate each other, and reputation can't be forged."
 
 **OBS scene:** `02_profile_zoom` — close-up on agent profile, zoom into ENSIP-25 panel.
 

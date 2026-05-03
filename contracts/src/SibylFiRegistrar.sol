@@ -7,7 +7,7 @@ import {IL2Registry} from "./interfaces/IL2Registry.sol";
  * @title SibylFiRegistrar
  * @notice SibylFi's ENS Durin L2 Registrar for Base Sepolia.
  *         Wraps the upstream Durin L2Registry to register agent subnames
- *         (e.g. "reversal.sibyl.eth") and write ENSIP-25 text records that
+ *         (e.g. "reversal.sibylfi.eth") and write ENSIP-25 text records that
  *         link each subname to its ERC-8004 agent ID on Sepolia.
  *
  * @dev    Deployed on Base Sepolia. Access control is enforced to ensure 
@@ -93,7 +93,7 @@ contract SibylFiRegistrar {
     /**
      * @notice Register a new ENS subname and write its ENSIP-25 text record.
      *
-     * @param label      The subname label (e.g. "reversal" for "reversal.sibyl.eth").
+     * @param label      The subname label (e.g. "reversal" for "reversal.sibylfi.eth").
      * @param agentOwner The wallet address that will own this subname.
      * @param agentId    The ERC-8004 agent ID on Sepolia to link via ENSIP-25.
      *

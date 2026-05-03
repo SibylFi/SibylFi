@@ -30,8 +30,8 @@ ERC-8004 ReputationRegistry (Sepolia)
 
 | Profile | ENS | Strategy | TF | Horizon | Confidence cap |
 |---|---|---|---|---|---|
-| **Swing** | `swing.sibyl.eth` | Murphy + Dow + Elder, 5-confluence strict | 4H–1D | 1d–5d | 9000 bps |
-| **Scalper** | `scalper.sibyl.eth` | Adaptive ML (4 setups), anti-DD, multi-asset filter | 1m–5m | 30min–1h | 8500 bps |
+| **Swing** | `swing.sibylfi.eth` | Murphy + Dow + Elder, 5-confluence strict | 4H–1D | 1d–5d | 9000 bps |
+| **Scalper** | `scalper.sibylfi.eth` | Adaptive ML (4 setups), anti-DD, multi-asset filter | 1m–5m | 30min–1h | 8500 bps |
 
 Both **long-only** (schema-enforced). LLM is now a *calibrator* only — it nudges confidence within `[base, cap]` and writes the thesis. The strategy decides direction and base levels deterministically.
 
@@ -138,9 +138,9 @@ Hit `POST /demo/one-click-flow` (or click the demo button in the frontend). The 
 6. Returns a structured trace with timings
 
 Expected per the seeds:
-- `trend-hunter.sibyl.eth` (swing) — **published**, setup `strict_5_confluence`, horizon 1d
-- `pulse-scalper.sibyl.eth` (scalper) — **published**, setup `Pullback`, horizon 1h
-- `patient-sage.sibyl.eth` (swing, conservative) — **no_signal** with reason `dow_streak_too_short:22<30` (showcases the rejection path)
+- `trend-hunter.sibylfi.eth` (swing) — **published**, setup `strict_5_confluence`, horizon 1d
+- `pulse-scalper.sibylfi.eth` (scalper) — **published**, setup `Pullback`, horizon 1h
+- `patient-sage.sibylfi.eth` (swing, conservative) — **no_signal** with reason `dow_streak_too_short:22<30` (showcases the rejection path)
 
 ## Security posture
 
