@@ -41,11 +41,17 @@ class Settings(BaseSettings):
     VALIDATOR_KEY: str = "0x" + "06" * 32
 
     # x402
-    COINBASE_CDP_KEY: str = "MOCK_CDP_KEY"
-    X402_FACILITATOR_URL: str = "https://facilitator.cdp.coinbase.com"
-    # When set, requests carrying this token bypass the CDP facilitator call so
-    # the demo can run without a live x402 subscription.  Leave empty in prod.
-    X402_DEMO_TOKEN: str = "demo-mock-token"
+    # Public testnet facilitator (no auth, supports base-sepolia x402v1 exact).
+    # Coinbase CDP key is only required for mainnet networks via the CDP-hosted
+    # facilitator and is unused on Base Sepolia.
+    COINBASE_CDP_KEY: str = ""
+    X402_FACILITATOR_URL: str = "https://facilitator.x402.rs"
+    # x402 network identifier for the asset paid in (USDC on Base Sepolia).
+    X402_NETWORK: str = "base-sepolia"
+    # Escape hatch for demo-mode bypass. The middleware honours it ONLY when
+    # MOCK_MODE=1 OR FORCE_X402_DEMO=1 — never silently in real mode.
+    X402_DEMO_TOKEN: str = ""
+    FORCE_X402_DEMO: bool = False
 
     # Inference
     ANTHROPIC_API_KEY: str = "MOCK_ANTHROPIC_KEY"
@@ -75,6 +81,29 @@ class Settings(BaseSettings):
     # Token addresses on Base Sepolia
     USDC_BASE_SEPOLIA: str = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
     WETH_BASE_SEPOLIA: str = "0x4200000000000000000000000000000000000006"
+
+    # Mainnet token addresses — used ONLY by the Trading API shadow quote for
+    # the same pair (Uniswap's hosted Trading API doesn't support testnets).
+    USDC_MAINNET: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    WETH_MAINNET: str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+    CHAIN_ID_ETHEREUM: int = 1
+
+    # Uniswap V3 — used by Validator for on-chain TWAP settlement.
+    # Factory address is the canonical V3 deployment on Base Sepolia. The
+    # validator calls factory.getPool(token0, token1, fee) → pool, then
+    # pool.observe([secondsAgos]) for deterministic settlement. Falls back to
+    # Kraken (clearly logged as degraded_mode) when no pool exists or the pool
+    # has insufficient observation cardinality for the requested horizon.
+    UNISWAP_V3_FACTORY_BASE_SEPOLIA: str = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+    UNISWAP_V3_FEE_TIER: int = 500   # 0.05% — canonical for WETH/USDC
+
+    # Uniswap V3 router/quoter for direct on-chain swaps. Uniswap's hosted
+    # Trading API does not support testnets (returns ResourceNotFound on Base
+    # Sepolia), so the Trading Agent calls SwapRouter02 directly.
+    UNISWAP_V3_SWAP_ROUTER02_BASE_SEPOLIA: str = "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4"
+    UNISWAP_V3_QUOTER_V2_BASE_SEPOLIA: str = "0xC5290058841028F1614F3A6F0F5816cAd0df5E27"
+    SWAP_SLIPPAGE_BPS: int = 50      # 0.5% — minOut tolerance on exactInputSingle
+    SWAP_DEADLINE_SECONDS: int = 300
 
     @property
     def database_url(self) -> str:
